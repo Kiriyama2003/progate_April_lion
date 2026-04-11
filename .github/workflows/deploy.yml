@@ -2,8 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    # branches: [ "main" ] # mainにpushされたら自動実行
-    branches: [ "voice-check_mobile-browser" ] # 音声確認　すぐに戻す
+    branches: [ "main" ] # mainにpushされたら自動実行
 
 permissions:
   contents: read
