@@ -30,10 +30,15 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_riverpod: ^2.5.1  # 状態管理（掲示板の更新）用
+  record: ^5.1.0            # 音声録音（マイク使用権限）用
+  noise_meter: ^4.0.1       # 音圧（デシベル）検知用
+  audioplayers: ^5.2.1      # 「ガオー！」という通知音再生用
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  amplify_authenticator: ^2.5.1
 
 dev_dependencies:
   flutter_test:
