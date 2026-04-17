@@ -137,6 +137,7 @@ class SavannahScreen extends ConsumerWidget {
                   text: "大学一限がつらい！！",
                   volume: maxDb,
                   emotion: maxDb > 85 ? LionEmotion.angry : LionEmotion.tired,
+                  createdAt: DateTime.now(),
                 );
                 ref.read(roarProvider.notifier).addPost(newPost);
 
