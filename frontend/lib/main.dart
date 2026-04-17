@@ -1,4 +1,3 @@
-//import 'package:amplify_authenticator/amplify_authenticator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'models.dart';
@@ -9,8 +8,7 @@ void main() => runApp(const ProviderScope(child: MyApp()));
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
-  @override //メソッドの上書きの意味
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
@@ -41,6 +39,11 @@ class MyApp extends StatelessWidget {
 class SavannahScreen extends ConsumerWidget {
   const SavannahScreen({super.key});
 
+  String _formatTime(DateTime time) {
+    return '${time.year}/${time.month.toString().padLeft(2, '0')}/${time.day.toString().padLeft(2, '0')} '
+           '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final posts = ref.watch(roarProvider);
@@ -70,13 +73,20 @@ class SavannahScreen extends ConsumerWidget {
                   children: [
                     ListTile(
                       leading: const Text('🦁', style: TextStyle(fontSize: 30)),
-                      title: Text(
-                        post.text,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                      title: Text(post.text, style: const TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Text(
-                        '音圧: ${post.volume.toStringAsFixed(1)} dB',
+                        '音圧: ${post.volume.toStringAsFixed(1)} dB ・ ${_formatTime(post.createdAt)}',
                       ),
+                    ),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: Icon(Icons.thumb_up,
+                              color: post.likes > 0 ? Colors.blue : Colors.grey),
+                          onPressed: () => ref.read(roarProvider.notifier).likePost(index),
+                        ),
+                        Text('${post.likes}'),
+                      ],
                     ),
                     if (post.leaderReply != null)
                       Container(
@@ -92,6 +102,27 @@ class SavannahScreen extends ConsumerWidget {
                           style: const TextStyle(fontStyle: FontStyle.italic),
                         ),
                       ),
+                    ...post.comments.map(
+                      (comment) => Padding(
+                        padding: const EdgeInsets.only(left: 16, bottom: 8),
+                        child: Text(
+                          '💬 ${comment.text} ・ ${_formatTime(comment.createdAt)}',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                      child: _CommentInput(
+                        onSubmit: (comment) {
+                          if (comment.isNotEmpty) {
+                            ref.read(roarProvider.notifier).addComment(index, comment);
+                          }
+                        },
+                      ),
+                    ),
+                    const Divider(),
                   ],
                 );
               },
@@ -121,5 +152,51 @@ class SavannahScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+class _CommentInput extends StatefulWidget {
+  final Function(String) onSubmit;
+  const _CommentInput({required this.onSubmit});
+
+  @override
+  State<_CommentInput> createState() => _CommentInputState();
+}
+
+class _CommentInputState extends State<_CommentInput> {
+  final _controller = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _controller,
+            decoration: InputDecoration(
+              hintText: 'コメントを追加...',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          icon: const Icon(Icons.send, color: Colors.orange),
+          onPressed: () {
+            widget.onSubmit(_controller.text);
+            _controller.clear();
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 }
