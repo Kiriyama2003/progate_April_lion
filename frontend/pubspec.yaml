@@ -16,8 +16,9 @@ dependencies:
   amplify_api: ^1.0.0
   amplify_storage_s3: ^1.0.0
   amplify_authenticator: ^1.0.0
-  record: ^5.2.0
-  path_provider: ^2.0.0
+  record: ^6.2.0
+  path_provider: ^2.1.5
+  audioplayers: ^6.6.0
 
 dev_dependencies:
   flutter_test:

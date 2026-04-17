@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   amplify_db_common
+  audioplayers_windows
   connectivity_plus
   record_windows
   url_launcher_windows
