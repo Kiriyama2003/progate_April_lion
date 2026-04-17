@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:async'; // 👈 追加：タイマーを使うために必要
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:amplify_flutter/amplify_flutter.dart';
 import 'package:amplify_auth_cognito/amplify_auth_cognito.dart';
@@ -37,258 +37,176 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return Authenticator(
       child: MaterialApp(
-        theme: ThemeData.dark(),
+        theme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.orange, brightness: Brightness.dark),
+        ),
         builder: Authenticator.builder(),
-        home: const DebugPage(),
+        home: const TimelinePage(),
       ),
     );
   }
 }
 
-class DebugPage extends StatefulWidget {
-  const DebugPage({super.key});
+class TimelinePage extends StatefulWidget {
+  const TimelinePage({super.key});
   @override
-  State<DebugPage> createState() => _DebugPageState();
+  State<TimelinePage> createState() => _TimelinePageState();
 }
 
-class _DebugPageState extends State<DebugPage> {
+class _TimelinePageState extends State<TimelinePage> {
   final AudioRecorder _recorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   
-  // 🎙️ 録音・音量用
-  Timer? _amplitudeTimer; 
-  double _maxAmplitude = -100.0; // 録音中の最大音量を保持
-  double _currentAmplitude = -100.0; // リアルタイムの音量
-  
+  List<dynamic> _posts = [];
   bool _isRecording = false;
-  String _statusMessage = "待機中...";
-  String _lambdaResponse = "Lambdaからの返信はまだありません";
-  String _lastS3Key = "";
-
-  // 🎵 再生プレイヤー用の変数
-  Duration _duration = Duration.zero;
-  Duration _position = Duration.zero;
-  double _volume = 0.5;
+  String? _lastLocalPath; // ローカル再生用
+  double _maxAmplitude = -100.0;
+  Timer? _amplitudeTimer;
 
   @override
   void initState() {
     super.initState();
-    _audioPlayer.onDurationChanged.listen((d) => setState(() => _duration = d));
-    _audioPlayer.onPositionChanged.listen((p) => setState(() => _position = p));
-    _audioPlayer.onPlayerComplete.listen((_) {
-      setState(() { _position = _duration; _statusMessage = "再生完了！"; });
-    });
+    _fetchTimeline();
   }
 
   @override
   void dispose() {
-    _amplitudeTimer?.cancel(); // タイマーを破棄
+    _amplitudeTimer?.cancel();
     _recorder.dispose();
     _audioPlayer.dispose();
     super.dispose();
   }
 
+  // --- 🛰️ タイムライン取得（新着順ソート） ---
+  Future<void> _fetchTimeline() async {
+    try {
+      final res = await Amplify.API.get('/timeline').response;
+      final List<dynamic> data = jsonDecode(res.decodeBody());
+      
+      // タイムスタンプでソート（新しい順）
+      data.sort((a, b) => (b['timestamp'] ?? "").compareTo(a['timestamp'] ?? ""));
+      
+      setState(() => _posts = data);
+    } catch (e) {
+      print("取得エラー: $e");
+    }
+  }
+
   // --- 🎙️ 録音開始 ---
   Future<void> _startRecording() async {
-    try {
-      if (await _recorder.hasPermission()) {
-        final dir = await getTemporaryDirectory();
-        final path = '${dir.path}/roar_${DateTime.now().millisecondsSinceEpoch}.m4a';
-        
-        // 計測値をリセット
-        _maxAmplitude = -100.0;
-        
-        await _recorder.start(const RecordConfig(), path: path);
-        
-        // 👈 100ミリ秒ごとに音量をチェックするタイマーを開始
-        _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
-          final amp = await _recorder.getAmplitude();
-          setState(() {
-            _currentAmplitude = amp.current;
-            if (amp.current > _maxAmplitude) {
-              _maxAmplitude = amp.current; // 最大値を更新
-            }
-          });
-        });
-
-        setState(() {
-          _isRecording = true;
-          _statusMessage = "録音中ガオォォ！！";
-        });
-      }
-    } catch (e) {
-      setState(() => _statusMessage = "録音エラー: $e");
-    }
-  }
-
-  // --- 🚀 録音停止 & 送信 ---
-  Future<void> _stopAndUpload() async {
-    try {
-      _amplitudeTimer?.cancel(); // タイマーを止める
-      final path = await _recorder.stop();
-      setState(() { _isRecording = false; _statusMessage = "処理中..."; });
-      if (path == null) return;
-
-      final key = 'public/roars/${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await Amplify.Storage.uploadFile(localFile: AWSFile.fromPath(path), key: key).result;
-
-      final user = await Amplify.Auth.getCurrentUser();
-      
-      // 👈 本物の最大音量（_maxAmplitude）を送信！
-      final operation = Amplify.API.post('/roars', body: HttpPayload.json({
-        "userId": user.userId,
-        "userName": user.username,
-        "s3Key": key,
-        "roarPower": _maxAmplitude, // ダミーの99.9を卒業！
-        "message": "サバンナからのリアル咆哮！"
-      }));
-      
-      final response = await operation.response;
-      
-      setState(() {
-        _lastS3Key = key;
-        _lambdaResponse = response.decodeBody();
-        _statusMessage = "送信完了だガオ！ (Power: ${_maxAmplitude.toStringAsFixed(1)} dB)";
+    if (await _recorder.hasPermission()) {
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/roar_temp.m4a';
+      _maxAmplitude = -100.0;
+      await _recorder.start(const RecordConfig(), path: path);
+      _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
+        final amp = await _recorder.getAmplitude();
+        if (amp.current > _maxAmplitude) _maxAmplitude = amp.current;
       });
-    } catch (e) {
-      setState(() => _statusMessage = "送信エラー: $e");
+      setState(() => _isRecording = true);
     }
   }
 
-  Future<void> _playLastRoar() async {
-    if (_lastS3Key.isEmpty) return;
-    try {
-      final result = await Amplify.Storage.getUrl(key: _lastS3Key).result;
-      await _audioPlayer.play(UrlSource(result.url.toString()));
-      setState(() => _statusMessage = "再生中...");
-    } catch (e) {
-      setState(() => _statusMessage = "再生エラー: $e");
-    }
+  // --- 🚀 送信処理 ---
+  Future<void> _stopAndUpload() async {
+    _amplitudeTimer?.cancel();
+    final path = await _recorder.stop();
+    setState(() => _isRecording = false);
+    if (path == null) return;
+
+    _lastLocalPath = path; // ローカル保存
+
+    final key = 'public/roars/${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await Amplify.Storage.uploadFile(localFile: AWSFile.fromPath(path), key: key).result;
+
+    final user = await Amplify.Auth.getCurrentUser();
+    await Amplify.API.post('/roars', body: HttpPayload.json({
+      "userId": user.userId,
+      "userName": user.username,
+      "s3Key": key,
+      "roarPower": _maxAmplitude,
+      "message": "サバンナに響け！"
+    })).response;
+
+    _fetchTimeline(); // 投稿後に更新
   }
 
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, "0");
-    final minutes = twoDigits(duration.inMinutes.remainder(60));
-    final seconds = twoDigits(duration.inSeconds.remainder(60));
-    return "$minutes:$seconds";
+  // --- 🔊 再生（S3経由） ---
+  Future<void> _playS3(String key) async {
+    final result = await Amplify.Storage.getUrl(key: key).result;
+    await _audioPlayer.play(UrlSource(result.url.toString()));
+  }
+
+  // --- 🏠 再生（ローカル経由） ---
+  Future<void> _playLocal() async {
+    if (_lastLocalPath != null) {
+      await _audioPlayer.play(DeviceFileSource(_lastLocalPath!));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('🦁 本格デバッグ・サバンナ V3')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            // 1. ステータス & 音量メーター表示
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(color: Colors.blueGrey[900], borderRadius: BorderRadius.circular(10)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("状態: $_statusMessage", style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  // 🔊 視覚的に音量が見えるバーを追加
-                  Text("現在の音量: ${_currentAmplitude.toStringAsFixed(1)} dB"),
-                  LinearProgressIndicator(
-                    value: (_currentAmplitude + 100) / 100, // -100を0、0を1に変換
-                    backgroundColor: Colors.black,
-                    color: Colors.orange,
-                  ),
-                  const SizedBox(height: 5),
-                  Text("最大パワー (送信値): ${_maxAmplitude.toStringAsFixed(1)} dB", style: const TextStyle(fontSize: 12, color: Colors.orangeAccent)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // 2. プレイヤーコントロール
-            Card(
-              color: Colors.black45,
-              child: Padding(
-                padding: const EdgeInsets.all(15.0),
-                child: Column(
-                  children: [
-                    const Text("🔈 プレイヤーコントロール", style: TextStyle(fontWeight: FontWeight.bold)),
-                    Slider(
-                      value: _position.inMilliseconds.toDouble(),
-                      max: _duration.inMilliseconds.toDouble() > 0 ? _duration.inMilliseconds.toDouble() : 1.0,
-                      onChanged: (value) async {
-                        await _audioPlayer.seek(Duration(milliseconds: value.toInt()));
-                      },
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(_formatDuration(_position)),
-                        Text(_formatDuration(_duration)),
-                      ],
-                    ),
-                    const Divider(color: Colors.white24),
-                    Row(
-                      children: [
-                        const Icon(Icons.volume_down),
-                        Expanded(
-                          child: Slider(
-                            value: _volume,
-                            onChanged: (value) {
-                              setState(() => _volume = value);
-                              _audioPlayer.setVolume(value);
-                            },
-                          ),
-                        ),
-                        const Icon(Icons.volume_up),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            
-            const SizedBox(height: 20),
-
-            // 3. 操作ボタン
-            Wrap(
-              spacing: 10, runSpacing: 10, alignment: WrapAlignment.center,
+      appBar: AppBar(
+        title: const Text('🦁 サバンナ・タイムライン'),
+        actions: [
+          IconButton(onPressed: _fetchTimeline, icon: const Icon(Icons.refresh)),
+          const SignOutButton(),
+        ],
+      ),
+      body: Column(
+        children: [
+          // 録音セクション
+          Container(
+            padding: const EdgeInsets.all(20),
+            color: Theme.of(context).colorScheme.surfaceVariant,
+            child: Row(
               children: [
-                ElevatedButton.icon(
+                Expanded(
+                  child: Text(_isRecording ? "全力で吠えろ！" : "最新の声をチェックだガオ！"),
+                ),
+                if (_lastLocalPath != null)
+                  IconButton(onPressed: _playLocal, icon: const Icon(Icons.history), tooltip: "直前の録音をローカル再生"),
+                FloatingActionButton(
                   onPressed: _isRecording ? _stopAndUpload : _startRecording,
-                  icon: Icon(_isRecording ? Icons.stop : Icons.mic),
-                  label: Text(_isRecording ? '止めて送信' : '吠える（録音）'),
-                  style: ElevatedButton.styleFrom(backgroundColor: _isRecording ? Colors.red : Colors.orange),
-                ),
-                ElevatedButton.icon(
-                  onPressed: _playLastRoar,
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('S3から再生'),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    final res = await Amplify.API.get('/timeline').response;
-                    setState(() => _lambdaResponse = res.decodeBody());
-                  },
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('タイムライン取得'),
+                  backgroundColor: _isRecording ? Colors.red : Colors.orange,
+                  child: Icon(_isRecording ? Icons.stop : Icons.mic),
                 ),
               ],
             ),
-
-            const SizedBox(height: 20),
-
-            // 4. Lambda返信エリア
-            const Align(alignment: Alignment.centerLeft, child: Text("▼ APIレスポンス")),
-            Container(
-              width: double.infinity, height: 200, padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(5)),
-              child: SingleChildScrollView(child: Text(_lambdaResponse, style: const TextStyle(color: Colors.lightBlueAccent, fontSize: 11))),
+          ),
+          // タイムラインリスト
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _fetchTimeline,
+              child: ListView.builder(
+                itemCount: _posts.length,
+                itemBuilder: (context, index) {
+                  final post = _posts[index];
+                  return Card(
+                    margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    child: ListTile(
+                      leading: const CircleAvatar(child: Icon(Icons.person)),
+                      title: Text(post['userName'] ?? '名無しライオン', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(post['timestamp']?.toString().split('T').first ?? ''),
+                          Text("Power: ${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB"),
+                        ],
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.play_circle_fill, size: 40, color: Colors.orange),
+                        onPressed: () => _playS3(post['s3Key']),
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
-            const SizedBox(height: 20),
-            const SignOutButton(),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
