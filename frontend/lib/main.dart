@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async'; // 👈 追加：タイマーを使うために必要
 import 'package:flutter/material.dart';
 import 'package:amplify_flutter/amplify_flutter.dart';
 import 'package:amplify_auth_cognito/amplify_auth_cognito.dart';
@@ -54,48 +55,62 @@ class _DebugPageState extends State<DebugPage> {
   final AudioRecorder _recorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   
+  // 🎙️ 録音・音量用
+  Timer? _amplitudeTimer; 
+  double _maxAmplitude = -100.0; // 録音中の最大音量を保持
+  double _currentAmplitude = -100.0; // リアルタイムの音量
+  
   bool _isRecording = false;
   String _statusMessage = "待機中...";
   String _lambdaResponse = "Lambdaからの返信はまだありません";
   String _lastS3Key = "";
 
   // 🎵 再生プレイヤー用の変数
-  Duration _duration = Duration.zero;   // 音声の全長
-  Duration _position = Duration.zero;   // 現在の再生位置
-  double _volume = 0.5;                // 音量 (0.0 ～ 1.0)
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+  double _volume = 0.5;
 
   @override
   void initState() {
     super.initState();
-    // 再生状態の監視設定
-    _audioPlayer.onDurationChanged.listen((d) {
-      setState(() => _duration = d);
-    });
-    _audioPlayer.onPositionChanged.listen((p) {
-      setState(() => _position = p);
-    });
+    _audioPlayer.onDurationChanged.listen((d) => setState(() => _duration = d));
+    _audioPlayer.onPositionChanged.listen((p) => setState(() => _position = p));
     _audioPlayer.onPlayerComplete.listen((_) {
-      setState(() {
-        _position = _duration;
-        _statusMessage = "再生完了！";
-      });
+      setState(() { _position = _duration; _statusMessage = "再生完了！"; });
     });
   }
 
   @override
   void dispose() {
+    _amplitudeTimer?.cancel(); // タイマーを破棄
     _recorder.dispose();
     _audioPlayer.dispose();
     super.dispose();
   }
 
-  // --- 録音・送信ロジック ---
+  // --- 🎙️ 録音開始 ---
   Future<void> _startRecording() async {
     try {
       if (await _recorder.hasPermission()) {
         final dir = await getTemporaryDirectory();
         final path = '${dir.path}/roar_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        
+        // 計測値をリセット
+        _maxAmplitude = -100.0;
+        
         await _recorder.start(const RecordConfig(), path: path);
+        
+        // 👈 100ミリ秒ごとに音量をチェックするタイマーを開始
+        _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+          final amp = await _recorder.getAmplitude();
+          setState(() {
+            _currentAmplitude = amp.current;
+            if (amp.current > _maxAmplitude) {
+              _maxAmplitude = amp.current; // 最大値を更新
+            }
+          });
+        });
+
         setState(() {
           _isRecording = true;
           _statusMessage = "録音中ガオォォ！！";
@@ -106,8 +121,10 @@ class _DebugPageState extends State<DebugPage> {
     }
   }
 
+  // --- 🚀 録音停止 & 送信 ---
   Future<void> _stopAndUpload() async {
     try {
+      _amplitudeTimer?.cancel(); // タイマーを止める
       final path = await _recorder.stop();
       setState(() { _isRecording = false; _statusMessage = "処理中..."; });
       if (path == null) return;
@@ -116,26 +133,28 @@ class _DebugPageState extends State<DebugPage> {
       await Amplify.Storage.uploadFile(localFile: AWSFile.fromPath(path), key: key).result;
 
       final user = await Amplify.Auth.getCurrentUser();
+      
+      // 👈 本物の最大音量（_maxAmplitude）を送信！
       final operation = Amplify.API.post('/roars', body: HttpPayload.json({
         "userId": user.userId,
         "userName": user.username,
         "s3Key": key,
-        "roarPower": 99.9,
-        "message": "サバンナからのデバッグ送信！"
+        "roarPower": _maxAmplitude, // ダミーの99.9を卒業！
+        "message": "サバンナからのリアル咆哮！"
       }));
+      
       final response = await operation.response;
       
       setState(() {
         _lastS3Key = key;
         _lambdaResponse = response.decodeBody();
-        _statusMessage = "送信完了だガオ！";
+        _statusMessage = "送信完了だガオ！ (Power: ${_maxAmplitude.toStringAsFixed(1)} dB)";
       });
     } catch (e) {
       setState(() => _statusMessage = "送信エラー: $e");
     }
   }
 
-  // --- 再生ロジック ---
   Future<void> _playLastRoar() async {
     if (_lastS3Key.isEmpty) return;
     try {
@@ -147,7 +166,6 @@ class _DebugPageState extends State<DebugPage> {
     }
   }
 
-  // 時間の表示を 00:00 形式にする補助関数
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, "0");
     final minutes = twoDigits(duration.inMinutes.remainder(60));
@@ -158,21 +176,36 @@ class _DebugPageState extends State<DebugPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('🦁 本格デバッグ・サバンナ V2')),
+      appBar: AppBar(title: const Text('🦁 本格デバッグ・サバンナ V3')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // 1. ステータス表示
+            // 1. ステータス & 音量メーター表示
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(15),
               decoration: BoxDecoration(color: Colors.blueGrey[900], borderRadius: BorderRadius.circular(10)),
-              child: Text("状態: $_statusMessage", style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("状態: $_statusMessage", style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  // 🔊 視覚的に音量が見えるバーを追加
+                  Text("現在の音量: ${_currentAmplitude.toStringAsFixed(1)} dB"),
+                  LinearProgressIndicator(
+                    value: (_currentAmplitude + 100) / 100, // -100を0、0を1に変換
+                    backgroundColor: Colors.black,
+                    color: Colors.orange,
+                  ),
+                  const SizedBox(height: 5),
+                  Text("最大パワー (送信値): ${_maxAmplitude.toStringAsFixed(1)} dB", style: const TextStyle(fontSize: 12, color: Colors.orangeAccent)),
+                ],
+              ),
             ),
             const SizedBox(height: 20),
 
-            // 2. プレイヤーコントロール (NEW!)
+            // 2. プレイヤーコントロール
             Card(
               color: Colors.black45,
               child: Padding(
@@ -180,7 +213,6 @@ class _DebugPageState extends State<DebugPage> {
                 child: Column(
                   children: [
                     const Text("🔈 プレイヤーコントロール", style: TextStyle(fontWeight: FontWeight.bold)),
-                    // 再生バー
                     Slider(
                       value: _position.inMilliseconds.toDouble(),
                       max: _duration.inMilliseconds.toDouble() > 0 ? _duration.inMilliseconds.toDouble() : 1.0,
@@ -188,7 +220,6 @@ class _DebugPageState extends State<DebugPage> {
                         await _audioPlayer.seek(Duration(milliseconds: value.toInt()));
                       },
                     ),
-                    // 時間表示
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -197,7 +228,6 @@ class _DebugPageState extends State<DebugPage> {
                       ],
                     ),
                     const Divider(color: Colors.white24),
-                    // 音量調整
                     Row(
                       children: [
                         const Icon(Icons.volume_down),
