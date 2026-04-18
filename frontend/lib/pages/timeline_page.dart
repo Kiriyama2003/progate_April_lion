@@ -12,7 +12,6 @@ import 'package:amplify_authenticator/amplify_authenticator.dart';
 import '../utils/format_utils.dart';
 import '../widgets/lion_painter.dart';
 import 'profile_page.dart';
-import '../utils/format_utils.dart';
 
 // ======================================================================
 // 🦁 1. メインのタイムライン画面
