@@ -58,9 +58,11 @@ Resources:
           TABLE_NAME: !Ref RoarTable
           USER_TABLE_NAME: !Ref UserTable # 👈 追加
           BUCKET_NAME: !Ref SavannahBucket
+          REACTION_TABLE_NAME: !Ref ReactionTable
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref RoarTable }
         - DynamoDBCrudPolicy: { TableName: !Ref UserTable } # 👈 権限追加
+        - DynamoDBCrudPolicy: { TableName: !Ref ReactionTable } # 👈 権限追加
         - S3FullAccessPolicy: { BucketName: !Ref SavannahBucket }
         - AmazonBedrockFullAccess
         - Statement: # 🌟 NEW: Transcribeを使えるようにする権限
@@ -83,6 +85,15 @@ Resources:
         PostProfile:
           Type: Api
           Properties: { Path: /profile, Method: post, RestApiId: !Ref ServerlessRestApi }
+        GetReactions:
+          Type: Api
+          Properties: { Path: /reactions, Method: get, RestApiId: !Ref ServerlessRestApi }
+        PostReactions:
+          Type: Api
+          Properties: { Path: /reactions, Method: post, RestApiId: !Ref ServerlessRestApi }
+        DeleteReactions:
+          Type: Api
+          Properties: { Path: /reactions, Method: delete, RestApiId: !Ref ServerlessRestApi }
 
   IdentityPool:
     Type: AWS::Cognito::IdentityPool
@@ -141,7 +152,12 @@ Resources:
               - Effect: Allow
                 Action: ["s3:PutObject", "s3:GetObject"]
                 Resource: !Sub "arn:aws:s3:::${SavannahBucket}/*"
-
+  ReactionTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: reactionId
+        Type: String
 Outputs:
   ApiUrl:
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"

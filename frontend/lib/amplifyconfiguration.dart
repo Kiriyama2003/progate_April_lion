@@ -6,7 +6,7 @@ const amplifyconfig = ''' {
             "awsAPIPlugin": {
                 "GaoGaoApi": {
                     "endpointType": "REST",
-                    "endpoint": "https://49o9nsv8y1.execute-api.us-east-1.amazonaws.com/Prod/",
+                    "endpoint": "https://49o9nsv8y1.execute-api.us-east-1.amazonaws.com/Prod",
                     "region": "us-east-1",
                     "authorizationType": "NONE"
                 }

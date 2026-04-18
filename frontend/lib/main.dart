@@ -71,16 +71,31 @@ class _TimelinePageState extends State<TimelinePage> {
   double _maxAmplitude = -100.0;
   Timer? _amplitudeTimer;
 
-  // 🌟 追加：アバターURLのキャッシュ
+  // アバターURLのキャッシュ
   final Map<String, String> _avatarUrlCache = {};
+  
+  // 🌟 追加：リアクションのキャッシュと自分のユーザーID
+  final Map<String, Map<String, dynamic>> _reactionsCache = {};
+  String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
+    _initUserId(); // 🌟 起動時に自分のIDを取得
     _fetchTimeline();
   }
 
-  // 🌟 追加：S3キーから画像URLを取得してキャッシュに保存
+  // 🌟 追加：自分のユーザーIDを保持しておく関数
+  Future<void> _initUserId() async {
+    try {
+      final user = await Amplify.Auth.getCurrentUser();
+      setState(() => _currentUserId = user.userId);
+    } catch (e) {
+      print("ユーザー情報取得エラー: $e");
+    }
+  }
+
+  // S3キーから画像URLを取得してキャッシュに保存
   Future<void> _loadAvatarUrl(String s3Key) async {
     if (s3Key.isEmpty || _avatarUrlCache.containsKey(s3Key)) return;
     try {
@@ -93,11 +108,10 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  // 🌟 追加：時間を「日時分秒」に整形する関数
+  // 時間を「日時分秒」に整形する関数
   String _formatTimestamp(String? timestamp) {
     if (timestamp == null || timestamp.isEmpty) return '';
     try {
-      // タイムスタンプをローカル時間（日本時間など）に変換
       final dateTime = DateTime.parse(timestamp).toLocal();
       final year = dateTime.year;
       final month = dateTime.month.toString().padLeft(2, '0');
@@ -120,14 +134,88 @@ class _TimelinePageState extends State<TimelinePage> {
       );
       setState(() => _posts = data);
 
-      // 🌟 追加：投稿データ取得後、各投稿者のアバターURLを読み込む
       for (var post in data) {
         if (post['avatarS3Key'] != null) {
           _loadAvatarUrl(post['avatarS3Key']);
         }
+        // 🌟 追加：各投稿のリアクション情報を取得する
+        final postId = post['postId'] as String?;
+        if (postId != null) {
+          _loadReactions(postId);
+        }
       }
     } catch (e) {
       print("取得エラー: $e");
+    }
+  }
+
+  // 🌟 追加：リアクション取得処理 (API GET /reactions)
+  Future<void> _loadReactions(String postId) async {
+    if (postId.isEmpty) return;
+    try {
+      final res = await Amplify.API.get(
+        'reactions',
+        queryParameters: {'postId': postId},
+      ).response;
+      final data = jsonDecode(res.decodeBody()) as Map<String, dynamic>;
+      setState(() => _reactionsCache[postId] = data);
+    } catch (e) {
+      print("リアクション取得エラー: $e");
+    }
+  }
+
+  // 🌟 追加：リアクションの追加・削除処理（爆速UIバージョン！）
+  Future<void> _toggleReaction(String postId, String reactionType) async {
+    final userId = _currentUserId;
+    if (userId == null) return;
+
+    final reactions = _reactionsCache[postId] ?? {};
+    final reactionData = reactions[reactionType] as Map<String, dynamic>?;
+    
+    // 現在のリストとカウントをコピー
+    final users = List<String>.from(reactionData?['users'] ?? []);
+    var count = reactionData?['count'] as int? ?? 0;
+    final hasReacted = users.contains(userId);
+
+    // ==========================================
+    // 🦁 1. 通信を待たずに、画面の見た目だけ「即座に」変える！
+    // ==========================================
+    setState(() {
+      if (hasReacted) {
+        users.remove(userId);
+        count--;
+      } else {
+        users.add(userId);
+        count++;
+      }
+      // キャッシュを上書きして画面を更新
+      _reactionsCache[postId]![reactionType] = {'count': count, 'users': users};
+    });
+
+    // ==========================================
+    // 🦁 2. その裏で、こっそりAWSにデータを送る
+    // ==========================================
+    try {
+      if (hasReacted) {
+        await Amplify.API.delete(
+          'reactions',
+          queryParameters: {'postId': postId, 'userId': userId, 'reactionType': reactionType},
+        ).response;
+      } else {
+        await Amplify.API.post(
+          'reactions',
+          body: HttpPayload.json({
+            'postId': postId,
+            'userId': userId,
+            'reactionType': reactionType,
+          }),
+        ).response;
+      }
+      // 通信が成功したら、念のため最新データを取得し直す
+      await _loadReactions(postId);
+    } catch (e) {
+      print("リアクションエラー: $e");
+      // もし通信エラーになったら、ここで元の色に戻す処理を書いたりします
     }
   }
 
@@ -164,7 +252,6 @@ class _TimelinePageState extends State<TimelinePage> {
 
     final user = await Amplify.Auth.getCurrentUser();
 
-    // プロフィール情報を取得して投稿に名前を乗せる
     final profileRes = await Amplify.API
         .get('profile', queryParameters: {'userId': user.userId})
         .response;
@@ -190,6 +277,45 @@ class _TimelinePageState extends State<TimelinePage> {
   Future<void> _playS3(String key) async {
     final result = await Amplify.Storage.getUrl(key: key).result;
     await _audioPlayer.play(UrlSource(result.url.toString()));
+  }
+
+  // 🌟 追加：リアクションボタンのUI作成
+  Widget _buildReactionButtons(String postId) {
+    final reactions = _reactionsCache[postId] ?? {};
+    
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0),
+      child: Wrap(
+        spacing: 8,
+        children: [
+          _reactionChip(postId, 'nice', '👍', 'いいね！', reactions),
+          _reactionChip(postId, 'wakaru', '💭', 'わかる', reactions),
+          _reactionChip(postId, 'sugoi', '🔥', 'すごい', reactions),
+          _reactionChip(postId, 'gao', '🦁', 'ガオ！', reactions),
+        ],
+      ),
+    );
+  }
+
+  // 🌟 追加：各リアクションボタンのデザインと動作
+  Widget _reactionChip(
+    String postId,
+    String type,
+    String emoji,
+    String label,
+    Map<String, dynamic> reactions,
+  ) {
+    final data = reactions[type] as Map<String, dynamic>?;
+    final count = data?['count'] as int? ?? 0;
+    final users = (data?['users'] as List?)?.cast<String>() ?? [];
+    final hasReacted = _currentUserId != null && users.contains(_currentUserId);
+
+    return ActionChip(
+      avatar: Text(emoji),
+      label: Text('$label $count'),
+      backgroundColor: hasReacted ? Colors.orange.withOpacity(0.3) : null,
+      onPressed: () => _toggleReaction(postId, type),
+    );
   }
 
   @override
@@ -247,7 +373,6 @@ class _TimelinePageState extends State<TimelinePage> {
                     itemCount: _posts.length,
                     itemBuilder: (context, index) {
                       final post = _posts[index];
-                      // 🌟 追加：キャッシュから画像URLを取り出す
                       final avatarS3Key = post['avatarS3Key'] as String?;
                       final avatarUrl = _avatarUrlCache[avatarS3Key];
 
@@ -291,7 +416,6 @@ class _TimelinePageState extends State<TimelinePage> {
                               Text(
                                 "Power: ${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB",
                               ),
-                              // 🌟 NEW: 文字起こしとAIのアドバイスを表示！
                               if (post['transcript'] != null &&
                                   post['transcript'].isNotEmpty)
                                 Text(
@@ -315,6 +439,9 @@ class _TimelinePageState extends State<TimelinePage> {
                                     ),
                                   ),
                                 ),
+                              // 🌟 追加：ここにリアクションボタンを表示する
+                              if (post['postId'] != null)
+                                _buildReactionButtons(post['postId']),
                             ],
                           ),
                           trailing: IconButton(
@@ -333,7 +460,6 @@ class _TimelinePageState extends State<TimelinePage> {
               ),
             ],
           ),
-          // 🌟 追加：録音中のライオンキング風オーバーレイ
           if (_isRecording)
             Positioned.fill(
               child: Container(
@@ -351,7 +477,6 @@ class _TimelinePageState extends State<TimelinePage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // アニメーションするボスライオンのイラスト
                         TweenAnimationBuilder<double>(
                           tween: Tween<double>(begin: 1.0, end: 1.15),
                           duration: const Duration(milliseconds: 500),
@@ -419,7 +544,6 @@ class LionPainter extends CustomPainter {
 
     final center = Offset(size.width / 2, size.height / 2);
 
-    // たてがみ（茶色）
     paint.color = const Color(0xFF8B4513);
     for (var angle = 0; angle < 360; angle += 15) {
       final rad = angle * 3.14159 / 180;
@@ -431,14 +555,12 @@ class LionPainter extends CustomPainter {
       );
     }
 
-    // 顔（黄色オレンジ）
     paint.color = const Color(0xFFFFA500);
     canvas.drawOval(
       Rect.fromCenter(center: center, width: 80, height: 85),
       paint,
     );
 
-    // 口周り（薄いクリーム色）
     paint.color = const Color(0xFFFFE4B5);
     canvas.drawOval(
       Rect.fromCenter(
@@ -449,7 +571,6 @@ class LionPainter extends CustomPainter {
       paint,
     );
 
-    // 大きく開いた口（叫んでいる）
     paint.color = const Color(0xFF8B0000);
     canvas.drawOval(
       Rect.fromCenter(
@@ -460,7 +581,6 @@ class LionPainter extends CustomPainter {
       paint,
     );
 
-    // 口の中（濃い赤）
     paint.color = const Color(0xFF4A0000);
     canvas.drawOval(
       Rect.fromCenter(
@@ -471,7 +591,6 @@ class LionPainter extends CustomPainter {
       paint,
     );
 
-    // 上の牙（左右）
     paint.color = Colors.white;
     canvas.drawOval(
       Rect.fromCenter(
@@ -490,7 +609,6 @@ class LionPainter extends CustomPainter {
       paint,
     );
 
-    // 鼻
     paint.color = const Color(0xFF4A2F00);
     canvas.drawOval(
       Rect.fromCenter(
@@ -501,7 +619,6 @@ class LionPainter extends CustomPainter {
       paint,
     );
 
-    // 目（白目）
     paint.color = Colors.white;
     canvas.drawOval(
       Rect.fromCenter(
@@ -520,17 +637,14 @@ class LionPainter extends CustomPainter {
       paint,
     );
 
-    // 瞳（黒い）
     paint.color = Colors.black;
     canvas.drawCircle(Offset(center.dx - 20, center.dy - 15), 6, paint);
     canvas.drawCircle(Offset(center.dx + 20, center.dy - 15), 6, paint);
 
-    // 瞳のハイライト
     paint.color = Colors.white;
     canvas.drawCircle(Offset(center.dx - 22, center.dy - 17), 2, paint);
     canvas.drawCircle(Offset(center.dx + 18, center.dy - 17), 2, paint);
 
-    // 眉毛（怒ってる/叫んでる感じ）
     paint.color = const Color(0xFF5C3317);
     paint.strokeWidth = 4;
     paint.style = PaintingStyle.stroke;
@@ -545,7 +659,6 @@ class LionPainter extends CustomPainter {
       paint,
     );
 
-    // 耳
     paint.style = PaintingStyle.fill;
     paint.color = const Color(0xFF8B4513);
     canvas.drawCircle(Offset(center.dx - 35, center.dy - 35), 15, paint);
@@ -616,7 +729,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
     setState(() => _isLoading = false);
   }
 
-  // 🌟 追加：時間を「日時分秒」に整形する関数（プロフィール画面の投稿一覧用）
   String _formatTimestamp(String? timestamp) {
     if (timestamp == null || timestamp.isEmpty) return '';
     try {
@@ -766,7 +878,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
                   ),
                   child: ListTile(
                     leading: const Icon(Icons.mic),
-                    // 🌟 修正：プロフィール画面の過去の投稿一覧にもフォーマットした時間を適用
                     title: Text(
                       _formatTimestamp(post['timestamp']),
                       style: const TextStyle(fontSize: 14),
