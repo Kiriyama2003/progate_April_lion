@@ -244,17 +244,15 @@ Future<void> _stopAndUpload() async {
     setState(() => _isRecording = false);
     if (path == null) return;
 
-    // 🌟 修正1：最初は 'public/' を付けずにファイル名だけを作る！
     final fileName = 'roars/${DateTime.now().millisecondsSinceEpoch}.m4a';
     
-    // ここでAmplifyが裏で勝手に 'public/' をくっつけてS3に保存してくれます
+    // アップロード
     await Amplify.Storage.uploadFile(
       localFile: AWSFile.fromPath(path),
       key: fileName, 
     ).result;
 
     final user = await Amplify.Auth.getCurrentUser();
-
     final profileRes = await Amplify.API
         .get('profile', queryParameters: {'userId': user.userId})
         .response;
@@ -267,8 +265,8 @@ Future<void> _stopAndUpload() async {
           body: HttpPayload.json({
             "userId": user.userId,
             "userName": currentName,
-            // 🌟 修正2：バックエンドに教える時だけ 'public/' を合体させる！
-            "s3Key": 'public/$fileName', 
+            // 🌟 修正：'public/' を付けず、アップロードした時と同じ key を渡す！
+            "s3Key": fileName, 
             "roarPower": _maxAmplitude,
             "message": "サバンナに響け！",
           }),
@@ -276,7 +274,7 @@ Future<void> _stopAndUpload() async {
         .response;
 
     _fetchTimeline();
-  }
+}
 
   Future<void> _playS3(String key) async {
     final result = await Amplify.Storage.getUrl(key: key).result;

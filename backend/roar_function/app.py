@@ -29,7 +29,6 @@ reaction_table = dynamodb.Table(REACTION_TABLE_NAME) # 👈 追加
 
 # AI関連のクライアント
 transcribe = boto3.client('transcribe')
-bedrock = boto3.client('bedrock-runtime', region_name='ap-northeast-1')
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
