@@ -3,19 +3,25 @@ backend:
   phases:
     build:
       commands:
-        # AWS SAMを使ってバックエンドをデプロイ
         - cd backend
         - sam build
-        - sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --stack-name my-backend-stack
+        # 🌟 超重要：スタック名（--stack-name）をお友達専用の名前に変更する！
+        # 例: honban ではなく friend-env などにする
+        - sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --stack-name friend-env --region us-east-1 --capabilities CAPABILITY_IAM --resolve-s3
 frontend:
   phases:
     preBuild:
       commands:
+        - echo "$AMPLIFYCONFIG" > frontend/lib/amplifyconfiguration.dart
+        - git clone https://github.com/flutter/flutter.git -b stable
+        - export PATH="$PATH:`pwd`/flutter/bin"
         - cd frontend
+        - flutter config --enable-web
+        - flutter upgrade
         - flutter pub get
     build:
       commands:
-        - flutter build web
+        - flutter build web --release
   artifacts:
     baseDirectory: frontend/build/web
     files:
@@ -23,3 +29,4 @@ frontend:
   cache:
     paths:
       - frontend/.pub-cache/**/*
+      - flutter/**/*
