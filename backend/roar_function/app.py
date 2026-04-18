@@ -28,7 +28,7 @@ user_table = dynamodb.Table(USER_TABLE_NAME)
 reaction_table = dynamodb.Table(REACTION_TABLE_NAME) # 👈 追加
 
 # AI関連のクライアント
-transcribe = boto3.client('transcribe')
+transcribe = boto3.client('transcribe', region_name='us-east-1')
 
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -39,7 +39,8 @@ CORS_HEADERS = {
 # --- 🎙️ 1. 文字起こし関数（詳細デバッグ版） ---
 def transcribe_audio(s3_key):
     job_name = f"roar_transcribe_{uuid.uuid4()}"
-    job_uri = f"s3://{BUCKET_NAME}/{s3_key}"
+    # 🌟 修正：S3のURIに 'public/' を追加する！
+    job_uri = f"s3://{BUCKET_NAME}/public/{s3_key}"
     
     print(f"[DEBUG 1] 文字起こし開始: job={job_name}, uri={job_uri}")
     
@@ -48,7 +49,7 @@ def transcribe_audio(s3_key):
         response = transcribe.start_transcription_job(
             TranscriptionJobName=job_name,
             Media={'MediaFileUri': job_uri},
-            MediaFormat='m4a',
+            # MediaFormat='m4a',
             LanguageCode='ja-JP'
         )
         print(f"[DEBUG 2] ジョブ登録成功！ステータス: {response['TranscriptionJob']['TranscriptionJobStatus']}")
