@@ -10,7 +10,7 @@ import 'package:amplify_storage_s3/amplify_storage_s3.dart';
 import 'package:amplify_authenticator/amplify_authenticator.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:audioplayers/audioplayers.dart' show AudioPlayer, UrlSource, AssetSource;
 import 'package:image_picker/image_picker.dart';
 
 import 'amplifyconfiguration.dart';
@@ -257,7 +257,21 @@ class _TimelinePageState extends State<TimelinePage> {
         )
         .response;
 
+    await _playLionRoar();
     _fetchTimeline();
+  }
+
+  Future<void> _playLionRoar() async {
+    try {
+      await _audioPlayer.stop();
+      await _audioPlayer.setVolume(1.0);
+      await _audioPlayer.play(UrlSource(
+        'https://actions.google.com/sounds/v1/animals/lion_roar.ogg',
+      ));
+      print("ライオンの鳴き声を再生しました");
+    } catch (e) {
+      print("ライオンの鳴き声再生エラー: $e");
+    }
   }
 
   Future<void> _playS3(String key) async {
