@@ -63,7 +63,7 @@ Resources:
     Properties:
       CodeUri: roar_function/
       Handler: app.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.10
       Timeout: 60
       Environment:
         Variables:
