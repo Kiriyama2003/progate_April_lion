@@ -214,7 +214,6 @@ class _TimelinePageState extends State<TimelinePage> {
                   return Card(
                     margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     child: ListTile(
-                      // 🌟 修正：画像を表示するように変更
                       leading: InkWell(
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => UserProfilePage(userId: post['userId']))),
                         child: CircleAvatar(
@@ -223,12 +222,25 @@ class _TimelinePageState extends State<TimelinePage> {
                         ),
                       ),
                       title: Text(post['userName'] ?? '名無し', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      // 🌟 修正：日時分秒の表示を適用
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(_formatTimestamp(post['timestamp']), style: const TextStyle(fontSize: 12, color: Colors.grey)),
                           Text("Power: ${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB"),
+                          // 🌟 NEW: 文字起こしとAIのアドバイスを表示！
+                          if (post['transcript'] != null && post['transcript'].isNotEmpty)
+                            Text("🗣️ 「${post['transcript']}」", style: const TextStyle(color: Colors.white70)),
+                          if (post['aiAdvice'] != null && post['aiAdvice'].isNotEmpty)
+                            Container(
+                              margin: const EdgeInsets.only(top: 5),
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(5),
+                                border: Border.all(color: Colors.orange),
+                              ),
+                              child: Text("🦁 AI師匠: ${post['aiAdvice']}", style: const TextStyle(color: Colors.orangeAccent)),
+                            ),
                         ],
                       ),
                       trailing: IconButton(
