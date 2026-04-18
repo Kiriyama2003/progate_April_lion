@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb; // 👈 追加：Webかどうかを判定する魔法
 import 'package:amplify_flutter/amplify_flutter.dart';
 import 'package:amplify_auth_cognito/amplify_auth_cognito.dart';
 import 'package:amplify_api/amplify_api.dart';
@@ -60,7 +61,7 @@ class _TimelinePageState extends State<TimelinePage> {
   
   List<dynamic> _posts = [];
   bool _isRecording = false;
-  String? _lastLocalPath; // ローカル再生用
+  String? _lastLocalPath;
   double _maxAmplitude = -100.0;
   Timer? _amplitudeTimer;
 
@@ -78,32 +79,44 @@ class _TimelinePageState extends State<TimelinePage> {
     super.dispose();
   }
 
-  // --- 🛰️ タイムライン取得（新着順ソート） ---
+  // --- 🛰️ タイムライン取得 ---
   Future<void> _fetchTimeline() async {
     try {
+      // 👈 修正：スラッシュが被らないように 'timeline' に変更
       final res = await Amplify.API.get('/timeline').response;
       final List<dynamic> data = jsonDecode(res.decodeBody());
       
-      // タイムスタンプでソート（新しい順）
       data.sort((a, b) => (b['timestamp'] ?? "").compareTo(a['timestamp'] ?? ""));
-      
       setState(() => _posts = data);
     } catch (e) {
       print("取得エラー: $e");
     }
   }
 
-  // --- 🎙️ 録音開始 ---
+  // --- 🎙️ 録音開始（Web対応版） ---
+  // --- 🎙️ 録音開始（完全Web対応版） ---
   Future<void> _startRecording() async {
     if (await _recorder.hasPermission()) {
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/roar_temp.m4a';
+      
+      // 👇 修正ポイント：最初は「空文字」を入れておく（WebはこれでOKになる）
+      String path = ''; 
+      
+      // Webじゃない（Windowsやスマホの）場合だけ、一時フォルダの場所を上書きする
+      if (!kIsWeb) {
+        final dir = await getTemporaryDirectory();
+        path = '${dir.path}/roar_temp.m4a';
+      }
+
       _maxAmplitude = -100.0;
+      
+      // エラーが消えるはずです！
       await _recorder.start(const RecordConfig(), path: path);
+      
       _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
         final amp = await _recorder.getAmplitude();
         if (amp.current > _maxAmplitude) _maxAmplitude = amp.current;
       });
+      
       setState(() => _isRecording = true);
     }
   }
@@ -115,12 +128,13 @@ class _TimelinePageState extends State<TimelinePage> {
     setState(() => _isRecording = false);
     if (path == null) return;
 
-    _lastLocalPath = path; // ローカル保存
+    _lastLocalPath = path;
 
     final key = 'public/roars/${DateTime.now().millisecondsSinceEpoch}.m4a';
     await Amplify.Storage.uploadFile(localFile: AWSFile.fromPath(path), key: key).result;
 
     final user = await Amplify.Auth.getCurrentUser();
+    // 👈 修正：ここも 'roars' に変更
     await Amplify.API.post('/roars', body: HttpPayload.json({
       "userId": user.userId,
       "userName": user.username,
@@ -129,19 +143,19 @@ class _TimelinePageState extends State<TimelinePage> {
       "message": "サバンナに響け！"
     })).response;
 
-    _fetchTimeline(); // 投稿後に更新
+    _fetchTimeline();
   }
 
-  // --- 🔊 再生（S3経由） ---
+  // --- 🔊 再生 ---
   Future<void> _playS3(String key) async {
     final result = await Amplify.Storage.getUrl(key: key).result;
     await _audioPlayer.play(UrlSource(result.url.toString()));
   }
 
-  // --- 🏠 再生（ローカル経由） ---
   Future<void> _playLocal() async {
     if (_lastLocalPath != null) {
-      await _audioPlayer.play(DeviceFileSource(_lastLocalPath!));
+      // 👈 Web版のBlob URLでも再生できるように UrlSource に統一
+      await _audioPlayer.play(UrlSource(_lastLocalPath!));
     }
   }
 
@@ -157,15 +171,12 @@ class _TimelinePageState extends State<TimelinePage> {
       ),
       body: Column(
         children: [
-          // 録音セクション
           Container(
             padding: const EdgeInsets.all(20),
             color: Theme.of(context).colorScheme.surfaceVariant,
             child: Row(
               children: [
-                Expanded(
-                  child: Text(_isRecording ? "全力で吠えろ！" : "最新の声をチェックだガオ！"),
-                ),
+                Expanded(child: Text(_isRecording ? "全力で吠えろ！" : "最新の声をチェックだガオ！")),
                 if (_lastLocalPath != null)
                   IconButton(onPressed: _playLocal, icon: const Icon(Icons.history), tooltip: "直前の録音をローカル再生"),
                 FloatingActionButton(
@@ -176,7 +187,6 @@ class _TimelinePageState extends State<TimelinePage> {
               ],
             ),
           ),
-          // タイムラインリスト
           Expanded(
             child: RefreshIndicator(
               onRefresh: _fetchTimeline,

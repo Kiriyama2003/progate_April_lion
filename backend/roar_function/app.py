@@ -5,7 +5,6 @@ import uuid
 from datetime import datetime
 import decimal
 
-# --- 1. DynamoDBから出す時の翻訳機 ---
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, decimal.Decimal):
@@ -16,18 +15,23 @@ TABLE_NAME = os.environ.get('TABLE_NAME')
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(TABLE_NAME)
 
+# 🌟 追加：絶対に返す「最強のCORS許可証」
+CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': '*',
+    'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
+}
+
 def lambda_handler(event, context):
     try:
         http_method = event.get('httpMethod')
 
         if http_method == 'POST':
-            # 👈 修正：送られてきたJSONの中の小数を、DynamoDBが好きな「Decimal」に自動変換して読み込む
             body = json.loads(event.get('body', '{}'), parse_float=decimal.Decimal)
 
             user_id = body.get('userId', 'guest')
             user_name = body.get('userName', '名無しライオン')
             s3_key = body.get('s3Key', '')
-            # デフォルト値も Decimal にしておく
             roar_power = body.get('roarPower', decimal.Decimal('0'))
             message = body.get('message', '')
 
@@ -43,16 +47,11 @@ def lambda_handler(event, context):
                 'message': message,
                 'timestamp': timestamp
             }
-
             table.put_item(Item=item)
 
             return {
                 'statusCode': 200,
-                'headers': {
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
-                },
+                'headers': CORS_HEADERS, # 👈 許可証をセット
                 'body': json.dumps({'message': 'ガオォォ！保存大成功！', 'postId': post_id})
             }
 
@@ -61,19 +60,21 @@ def lambda_handler(event, context):
             items = response.get('Items', [])
             return {
                 'statusCode': 200,
-                'headers': {
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
-                },
+                'headers': CORS_HEADERS, # 👈 許可証をセット
                 'body': json.dumps(items, cls=DecimalEncoder)
             }
 
-        return {'statusCode': 400, 'body': 'Unsupported method'}
+        return {
+            'statusCode': 400, 
+            'headers': CORS_HEADERS, # 👈 許可証をセット
+            'body': json.dumps({'message': 'Unsupported method'})
+        }
 
     except Exception as e:
         print(f"Error: {str(e)}")
+        # 🚨 超重要：エラーの時も「絶対に」許可証を返す！！
         return {
             'statusCode': 500,
+            'headers': CORS_HEADERS, # 👈 これがないとブラウザがFetchエラーを起こす
             'body': json.dumps({'message': 'Internal server error', 'errorDetail': str(e)})
         }

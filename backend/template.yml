@@ -2,6 +2,18 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Gao Gao Savannah Backend
 
+# ------------------------------------------------------------
+# 1. CORSを全リソースで許可するための設定（追加）
+# ------------------------------------------------------------
+Globals:
+  Function:
+    Timeout: 60
+  Api:
+    Cors:
+      AllowMethods: "'*'"
+      AllowHeaders: "'*'"
+      AllowOrigin: "'*'"
+
 Resources:
   # 1. 音声保存バケット
   SavannahBucket:
@@ -52,20 +64,26 @@ Resources:
       Events:
         PostRoar:
           Type: Api
-          Properties: { Path: /roars, Method: post }
+          Properties:
+            Path: /roars
+            Method: post
+            RestApiId: !Ref ServerlessRestApi # 👈 CORS設定を有効にするために追加
         GetTimeline:
           Type: Api
-          Properties: { Path: /timeline, Method: get }
-  # --- ここから追記 ---
+          Properties:
+            Path: /timeline
+            Method: get
+            RestApiId: !Ref ServerlessRestApi # 👈 CORS設定を有効にするために追加
+
+  # --- アイデンティティプール設定 ---
   IdentityPool:
     Type: AWS::Cognito::IdentityPool
     Properties:
       AllowUnauthenticatedIdentities: true
       CognitoIdentityProviders:
-        - ClientId: !Ref GaoGaoUserPoolClient       # 👈 ここを直す
-          ProviderName: !GetAtt GaoGaoUserPool.ProviderName # 👈 ここを直す
+        - ClientId: !Ref GaoGaoUserPoolClient
+          ProviderName: !GetAtt GaoGaoUserPool.ProviderName
 
-  # 入館証を使っていいよ、という権限設定（ロール）
   IdentityPoolRoleAttachment:
     Type: AWS::Cognito::IdentityPoolRoleAttachment
     Properties:
@@ -97,7 +115,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: ["s3:PutObject", "s3:GetObject"]
-                Resource: !Sub "arn:aws:s3:::${SavannahBucket}/*" # バケット名は自分のものに合わせてください
+                Resource: !Sub "arn:aws:s3:::${SavannahBucket}/*"
 
   # ログインユーザー用の権限
   AuthRole:
@@ -123,7 +141,7 @@ Resources:
               - Effect: Allow
                 Action: ["s3:PutObject", "s3:GetObject"]
                 Resource: !Sub "arn:aws:s3:::${SavannahBucket}/*"
-  # --- ここまで追記 ---
+
 Outputs:
   ApiUrl:
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
@@ -131,3 +149,5 @@ Outputs:
     Value: !Ref GaoGaoUserPool
   ClientId:
     Value: !Ref GaoGaoUserPoolClient
+  IdentityPoolId:
+    Value: !Ref IdentityPool
