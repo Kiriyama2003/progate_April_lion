@@ -15,7 +15,7 @@ Resources:
   SavannahBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "gaogao-savannah-${AWS::AccountId}"
+      BucketName: !Sub "gaogao-savannah-${AWS::StackName}-${AWS::AccountId}"
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders: ['*']
