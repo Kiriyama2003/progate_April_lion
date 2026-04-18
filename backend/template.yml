@@ -2,9 +2,6 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Gao Gao Savannah Backend
 
-# ------------------------------------------------------------
-# 1. CORSを全リソースで許可するための設定（追加）
-# ------------------------------------------------------------
 Globals:
   Function:
     Timeout: 60
@@ -15,7 +12,6 @@ Globals:
       AllowOrigin: "'*'"
 
 Resources:
-  # 1. 音声保存バケット
   SavannahBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -26,13 +22,18 @@ Resources:
             AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
             AllowedOrigins: ['*']
 
-  # 2. 投稿データDB
+  # 🌟 既存の投稿テーブル
   RoarTable:
     Type: AWS::Serverless::SimpleTable
     Properties:
       PrimaryKey: { Name: postId, Type: String }
 
-  # 3. ユーザー認証 (Cognito)
+  # 🌟 NEW: ユーザー情報（プロフィール）テーブルを追加！
+  UserTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey: { Name: userId, Type: String }
+
   GaoGaoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -45,7 +46,6 @@ Resources:
       UserPoolId: !Ref GaoGaoUserPool
       ClientName: GaoGaoAppClient
 
-  # 4. Lambda関数
   GaoGaoFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -56,26 +56,28 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref RoarTable
+          USER_TABLE_NAME: !Ref UserTable # 👈 追加
           BUCKET_NAME: !Ref SavannahBucket
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref RoarTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref UserTable } # 👈 権限追加
         - S3FullAccessPolicy: { BucketName: !Ref SavannahBucket }
-        - AmazonBedrockFullAccess # AI用
+        - AmazonBedrockFullAccess
       Events:
         PostRoar:
           Type: Api
-          Properties:
-            Path: /roars
-            Method: post
-            RestApiId: !Ref ServerlessRestApi # 👈 CORS設定を有効にするために追加
+          Properties: { Path: /roars, Method: post, RestApiId: !Ref ServerlessRestApi }
         GetTimeline:
           Type: Api
-          Properties:
-            Path: /timeline
-            Method: get
-            RestApiId: !Ref ServerlessRestApi # 👈 CORS設定を有効にするために追加
+          Properties: { Path: /timeline, Method: get, RestApiId: !Ref ServerlessRestApi }
+        # 🌟 NEW: プロフィール用のAPIを追加
+        GetProfile:
+          Type: Api
+          Properties: { Path: /profile, Method: get, RestApiId: !Ref ServerlessRestApi }
+        PostProfile:
+          Type: Api
+          Properties: { Path: /profile, Method: post, RestApiId: !Ref ServerlessRestApi }
 
-  # --- アイデンティティプール設定 ---
   IdentityPool:
     Type: AWS::Cognito::IdentityPool
     Properties:
@@ -92,7 +94,6 @@ Resources:
         unauthenticated: !GetAtt UnauthRole.Arn
         authenticated: !GetAtt AuthRole.Arn
 
-  # ゲスト用の権限
   UnauthRole:
     Type: AWS::IAM::Role
     Properties:
@@ -100,14 +101,11 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal:
-              Federated: cognito-identity.amazonaws.com
+            Principal: { Federated: cognito-identity.amazonaws.com }
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
-              StringEquals:
-                cognito-identity.amazonaws.com:aud: !Ref IdentityPool
-              ForAnyValue:StringLike:
-                cognito-identity.amazonaws.com:amr: unauthenticated
+              StringEquals: { "cognito-identity.amazonaws.com:aud": !Ref IdentityPool }
+              ForAnyValue:StringLike: { "cognito-identity.amazonaws.com:amr": unauthenticated }
       Policies:
         - PolicyName: S3Access
           PolicyDocument:
@@ -117,7 +115,6 @@ Resources:
                 Action: ["s3:PutObject", "s3:GetObject"]
                 Resource: !Sub "arn:aws:s3:::${SavannahBucket}/*"
 
-  # ログインユーザー用の権限
   AuthRole:
     Type: AWS::IAM::Role
     Properties:
@@ -125,14 +122,11 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal:
-              Federated: cognito-identity.amazonaws.com
+            Principal: { Federated: cognito-identity.amazonaws.com }
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
-              StringEquals:
-                cognito-identity.amazonaws.com:aud: !Ref IdentityPool
-              ForAnyValue:StringLike:
-                cognito-identity.amazonaws.com:amr: authenticated
+              StringEquals: { "cognito-identity.amazonaws.com:aud": !Ref IdentityPool }
+              ForAnyValue:StringLike: { "cognito-identity.amazonaws.com:amr": authenticated }
       Policies:
         - PolicyName: S3Access
           PolicyDocument:
@@ -145,9 +139,3 @@ Resources:
 Outputs:
   ApiUrl:
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
-  UserPoolId:
-    Value: !Ref GaoGaoUserPool
-  ClientId:
-    Value: !Ref GaoGaoUserPoolClient
-  IdentityPoolId:
-    Value: !Ref IdentityPool
