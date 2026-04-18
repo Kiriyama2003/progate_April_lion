@@ -34,6 +34,12 @@ Resources:
     Properties:
       PrimaryKey: { Name: userId, Type: String }
 
+  # 🌟 リアクションテーブル
+  ReactionTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey: { Name: reactionId, Type: String }
+
   GaoGaoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -53,14 +59,16 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.11
       Timeout: 60
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref RoarTable
-          USER_TABLE_NAME: !Ref UserTable # 👈 追加
-          BUCKET_NAME: !Ref SavannahBucket
+        Environment:
+          Variables:
+            TABLE_NAME: !Ref RoarTable
+            USER_TABLE_NAME: !Ref UserTable
+            REACTION_TABLE_NAME: !Ref ReactionTable
+            BUCKET_NAME: !Ref SavannahBucket
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref RoarTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref UserTable } # 👈 権限追加
+        - DynamoDBCrudPolicy: { TableName: !Ref UserTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref ReactionTable }
         - S3FullAccessPolicy: { BucketName: !Ref SavannahBucket }
         - AmazonBedrockFullAccess
         - Statement: # 🌟 NEW: Transcribeを使えるようにする権限
@@ -83,6 +91,16 @@ Resources:
         PostProfile:
           Type: Api
           Properties: { Path: /profile, Method: post, RestApiId: !Ref ServerlessRestApi }
+        # 🌟 リアクションAPI
+        GetReactions:
+          Type: Api
+          Properties: { Path: /reactions, Method: get, RestApiId: !Ref ServerlessRestApi }
+        PostReaction:
+          Type: Api
+          Properties: { Path: /reactions, Method: post, RestApiId: !Ref ServerlessRestApi }
+        DeleteReaction:
+          Type: Api
+          Properties: { Path: /reactions, Method: delete, RestApiId: !Ref ServerlessRestApi }
 
   IdentityPool:
     Type: AWS::Cognito::IdentityPool

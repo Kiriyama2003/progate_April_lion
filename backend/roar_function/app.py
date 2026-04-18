@@ -16,11 +16,13 @@ class DecimalEncoder(json.JSONEncoder):
 
 TABLE_NAME = os.environ.get('TABLE_NAME')
 USER_TABLE_NAME = os.environ.get('USER_TABLE_NAME')
+REACTION_TABLE_NAME = os.environ.get('REACTION_TABLE_NAME')
 BUCKET_NAME = os.environ.get('BUCKET_NAME')
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(TABLE_NAME)
 user_table = dynamodb.Table(USER_TABLE_NAME)
+reaction_table = dynamodb.Table(REACTION_TABLE_NAME)
 
 # AI関連のクライアント
 transcribe = boto3.client('transcribe')
@@ -196,6 +198,58 @@ def lambda_handler(event, context):
             response = user_table.get_item(Key={'userId': user_id})
             item = response.get('Item', {})
             return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(item)}
+
+        # ----------------------------------------
+        # 5. リアクション追加 (POST /reactions)
+        # ----------------------------------------
+        elif resource == '/reactions' and http_method == 'POST':
+            body = json.loads(event.get('body', '{}'))
+            post_id = body.get('postId')
+            user_id = body.get('userId')
+            reaction_type = body.get('reactionType')
+            
+            reaction_id = f"{post_id}#{user_id}"
+            
+            reaction_table.put_item(Item={
+                'reactionId': reaction_id,
+                'postId': post_id,
+                'userId': user_id,
+                'reactionType': reaction_type,
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
+            })
+            
+            return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps({'message': 'リアクション追加！'})}
+
+        # ----------------------------------------
+        # 6. リアクション削除 (DELETE /reactions)
+        # ----------------------------------------
+        elif resource == '/reactions' and http_method == 'DELETE':
+            post_id = query_params.get('postId')
+            user_id = query_params.get('userId')
+            
+            reaction_id = f"{post_id}#{user_id}"
+            reaction_table.delete_item(Key={'reactionId': reaction_id})
+            
+            return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps({'message': 'リアクション削除！'})}
+
+        # ----------------------------------------
+        # 7. 投稿のリアクション一覧取得 (GET /reactions)
+        # ----------------------------------------
+        elif resource == '/reactions' and http_method == 'GET':
+            post_id = query_params.get('postId')
+            
+            response = reaction_table.scan(FilterExpression=Attr('postId').eq(post_id))
+            reactions = response.get('Items', [])
+            
+            grouped = {}
+            for r in reactions:
+                rt = r.get('reactionType')
+                if rt not in grouped:
+                    grouped[rt] = {'count': 0, 'users': []}
+                grouped[rt]['count'] += 1
+                grouped[rt]['users'].append(r.get('userId'))
+            
+            return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(grouped)}
 
         return {'statusCode': 400, 'headers': CORS_HEADERS, 'body': json.dumps({'message': 'Unsupported method'})}
 

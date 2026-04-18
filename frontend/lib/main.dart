@@ -73,11 +73,20 @@ class _TimelinePageState extends State<TimelinePage> {
 
   // 🌟 追加：アバターURLのキャッシュ
   final Map<String, String> _avatarUrlCache = {};
+  // 🌟 追加：リアクションのキャッシュ
+  final Map<String, Map<String, dynamic>> _reactionsCache = {};
+  String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
+    _initUserId();
     _fetchTimeline();
+  }
+
+  Future<void> _initUserId() async {
+    final user = await Amplify.Auth.getCurrentUser();
+    setState(() => _currentUserId = user.userId);
   }
 
   // 🌟 追加：S3キーから画像URLを取得してキャッシュに保存
@@ -125,9 +134,61 @@ class _TimelinePageState extends State<TimelinePage> {
         if (post['avatarS3Key'] != null) {
           _loadAvatarUrl(post['avatarS3Key']);
         }
+        final postId = post['postId'] as String?;
+        if (postId != null) {
+          _loadReactions(postId);
+        }
       }
     } catch (e) {
       print("取得エラー: $e");
+    }
+  }
+
+  Future<void> _loadReactions(String postId) async {
+    if (postId.isEmpty) return;
+    try {
+      final res = await Amplify.API.get(
+        'reactions',
+        queryParameters: {'postId': postId},
+      ).response;
+      final data = jsonDecode(res.decodeBody()) as Map<String, dynamic>;
+      setState(() => _reactionsCache[postId] = data);
+    } catch (e) {
+      print("リアクション取得エラー: $e");
+    }
+  }
+
+  Future<void> _toggleReaction(String postId, String reactionType) async {
+    final userId = _currentUserId;
+    if (userId == null) return;
+
+    final reactions = _reactionsCache[postId] ?? {};
+    final reactionData = reactions[reactionType] as Map<String, dynamic>?;
+    final users = reactionData?['users'] as List? ?? [];
+    final hasReacted = users.contains(userId);
+
+    try {
+      if (hasReacted) {
+        final res = await Amplify.API.delete(
+          'reactions',
+          queryParameters: {'postId': postId, 'userId': userId},
+        ).response;
+        print("リアクション削除レスポンス: ${res.decodeBody()}");
+      } else {
+        final res = await Amplify.API.post(
+          'reactions',
+          body: HttpPayload.json({
+            'postId': postId,
+            'userId': userId,
+            'reactionType': reactionType,
+          }),
+        ).response;
+        print("リアクション追加レスポンス: ${res.decodeBody()}");
+      }
+      _reactionsCache.remove(postId);
+      await _loadReactions(postId);
+    } catch (e) {
+      print("リアクションエラー: $e");
     }
   }
 
@@ -190,6 +251,43 @@ class _TimelinePageState extends State<TimelinePage> {
   Future<void> _playS3(String key) async {
     final result = await Amplify.Storage.getUrl(key: key).result;
     await _audioPlayer.play(UrlSource(result.url.toString()));
+  }
+
+  Widget _buildReactionButtons(String postId) {
+    final reactions = _reactionsCache[postId] ?? {};
+    
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0),
+      child: Wrap(
+        spacing: 8,
+        children: [
+          _reactionChip(postId, 'nice', '👍', 'いいね！', reactions),
+          _reactionChip(postId, 'wakaru', '💭', 'わかる', reactions),
+          _reactionChip(postId, 'sugoi', '🔥', 'すごい', reactions),
+          _reactionChip(postId, 'gao', '🦁', 'ガオ！', reactions),
+        ],
+      ),
+    );
+  }
+
+  Widget _reactionChip(
+    String postId,
+    String type,
+    String emoji,
+    String label,
+    Map<String, dynamic> reactions,
+  ) {
+    final data = reactions[type] as Map<String, dynamic>?;
+    final count = data?['count'] as int? ?? 0;
+    final users = (data?['users'] as List?)?.cast<String>() ?? [];
+    final hasReacted = _currentUserId != null && users.contains(_currentUserId);
+
+    return ActionChip(
+      avatar: Text(emoji),
+      label: Text('$label $count'),
+      backgroundColor: hasReacted ? Colors.orange.withOpacity(0.3) : null,
+      onPressed: () => _toggleReaction(postId, type),
+    );
   }
 
   @override
@@ -315,6 +413,8 @@ class _TimelinePageState extends State<TimelinePage> {
                                     ),
                                   ),
                                 ),
+                              if (post['postId'] != null)
+                                _buildReactionButtons(post['postId']),
                             ],
                           ),
                           trailing: IconButton(
