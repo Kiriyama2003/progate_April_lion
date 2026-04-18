@@ -8,6 +8,9 @@ from datetime import datetime
 import decimal
 from boto3.dynamodb.conditions import Attr
 
+# 🌟 修正：region_name を 'us-east-1' に変更する！
+bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
+
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, decimal.Decimal):

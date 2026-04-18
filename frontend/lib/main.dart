@@ -238,16 +238,19 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  Future<void> _stopAndUpload() async {
+Future<void> _stopAndUpload() async {
     _amplitudeTimer?.cancel();
     final path = await _recorder.stop();
     setState(() => _isRecording = false);
     if (path == null) return;
 
-    final key = 'public/roars/${DateTime.now().millisecondsSinceEpoch}.m4a';
+    // 🌟 修正1：最初は 'public/' を付けずにファイル名だけを作る！
+    final fileName = 'roars/${DateTime.now().millisecondsSinceEpoch}.m4a';
+    
+    // ここでAmplifyが裏で勝手に 'public/' をくっつけてS3に保存してくれます
     await Amplify.Storage.uploadFile(
       localFile: AWSFile.fromPath(path),
-      key: key,
+      key: fileName, 
     ).result;
 
     final user = await Amplify.Auth.getCurrentUser();
@@ -264,7 +267,8 @@ class _TimelinePageState extends State<TimelinePage> {
           body: HttpPayload.json({
             "userId": user.userId,
             "userName": currentName,
-            "s3Key": key,
+            // 🌟 修正2：バックエンドに教える時だけ 'public/' を合体させる！
+            "s3Key": 'public/$fileName', 
             "roarPower": _maxAmplitude,
             "message": "サバンナに響け！",
           }),
