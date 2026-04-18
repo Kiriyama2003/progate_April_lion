@@ -75,7 +75,10 @@ class _TimelinePageState extends State<TimelinePage> {
   final Map<String, String> _avatarUrlCache = {};
   // 🌟 追加：リアクションのキャッシュ
   final Map<String, Map<String, dynamic>> _reactionsCache = {};
+  // 🌟 追加：コメントのキャッシュ
+  final Map<String, List<dynamic>> _commentsCache = {};
   String? _currentUserId;
+  String? _currentUserName;
 
   @override
   void initState() {
@@ -86,7 +89,15 @@ class _TimelinePageState extends State<TimelinePage> {
 
   Future<void> _initUserId() async {
     final user = await Amplify.Auth.getCurrentUser();
-    setState(() => _currentUserId = user.userId);
+    final profileRes = await Amplify.API.get(
+      'profile',
+      queryParameters: {'userId': user.userId},
+    ).response;
+    final profile = jsonDecode(profileRes.decodeBody());
+    setState(() {
+      _currentUserId = user.userId;
+      _currentUserName = profile['userName'] ?? user.username;
+    });
   }
 
   // 🌟 追加：S3キーから画像URLを取得してキャッシュに保存
@@ -137,6 +148,7 @@ class _TimelinePageState extends State<TimelinePage> {
         final postId = post['postId'] as String?;
         if (postId != null) {
           _loadReactions(postId);
+          _loadComments(postId);
         }
       }
     } catch (e) {
@@ -290,6 +302,245 @@ class _TimelinePageState extends State<TimelinePage> {
     );
   }
 
+  Widget _buildCommentSection(String postId) {
+    final comments = _commentsCache[postId] ?? [];
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 20),
+        Row(
+          children: [
+            const Icon(Icons.comment, size: 16, color: Colors.grey),
+            const SizedBox(width: 4),
+            Text(
+              'コメント ${comments.length}件',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: () => _showCommentDialog(postId, null),
+              child: const Text('コメントする', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+        if (comments.isNotEmpty)
+          Column(
+            children: comments.take(3).map((comment) {
+              return _buildCommentItem(postId, comment);
+            }).toList(),
+          ),
+        if (comments.length > 3)
+          TextButton(
+            onPressed: () => _showAllComments(postId),
+            child: Text('もっと見る (${comments.length - 3}件)'),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildCommentItem(String postId, Map<String, dynamic> comment) {
+    final commentId = comment['commentId'] as String?;
+    final userId = comment['userId'] as String?;
+    final userName = comment['userName'] as String? ?? '名無し';
+    final content = comment['content'] as String? ?? '';
+    final parentCommentId = comment['parentCommentId'] as String?;
+    
+    return Padding(
+      padding: EdgeInsets.only(
+        left: parentCommentId != null ? 24 : 0,
+        top: 4,
+        bottom: 4,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 12,
+            child: Text(userName.isNotEmpty ? userName[0] : '?', style: const TextStyle(fontSize: 10)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      userName,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _formatTimestamp(comment['timestamp'] as String?),
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+                  ],
+                ),
+                Text(content, style: const TextStyle(fontSize: 13)),
+                InkWell(
+                  onTap: () => _showCommentDialog(postId, commentId),
+                  child: const Text(
+                    '返信',
+                    style: TextStyle(fontSize: 11, color: Colors.orange),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadComments(String postId) async {
+    if (postId.isEmpty) return;
+    try {
+      final res = await Amplify.API.get(
+        'comments',
+        queryParameters: {'postId': postId},
+      ).response;
+      final data = jsonDecode(res.decodeBody()) as List;
+      setState(() => _commentsCache[postId] = data);
+    } catch (e) {
+      print("コメント取得エラー: $e");
+    }
+  }
+
+  Future<void> _showCommentDialog(String postId, String? parentCommentId) async {
+    final controller = TextEditingController();
+    final isReply = parentCommentId != null;
+    
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(isReply ? '返信する' : 'コメントする'),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: 'コメントを入力...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isEmpty) return;
+              Navigator.pop(context);
+              await _postComment(postId, controller.text, parentCommentId);
+            },
+            child: const Text('送信'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _postComment(String postId, String content, String? parentCommentId) async {
+    if (_currentUserId == null) return;
+    
+    try {
+      await Amplify.API.post(
+        'comments',
+        body: HttpPayload.json({
+          'postId': postId,
+          'userId': _currentUserId,
+          'userName': _currentUserName ?? '名無しライオン',
+          'content': content,
+          'parentCommentId': parentCommentId,
+        }),
+      );
+      await _loadComments(postId);
+    } catch (e) {
+      print("コメント投稿エラー: $e");
+    }
+  }
+
+  void _showAllComments(String postId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.95,
+        minChildSize: 0.5,
+        expand: false,
+        builder: (context, scrollController) => Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[800],
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: Row(
+                children: [
+                  const Text('コメント', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollController,
+                padding: const EdgeInsets.all(16),
+                itemCount: (_commentsCache[postId] ?? []).length,
+                itemBuilder: (context, index) {
+                  final comments = _commentsCache[postId] ?? [];
+                  return _buildCommentItem(postId, comments[index]);
+                },
+              ),
+            ),
+            Container(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                top: 8,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'コメントを入力...',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      onSubmitted: (value) {
+                        if (value.isNotEmpty) {
+                          Navigator.pop(context);
+                          _postComment(postId, value, null);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () {
+                      final controller = TextEditingController();
+                      _showCommentDialog(postId, null);
+                    },
+                    icon: const Icon(Icons.send, color: Colors.orange),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -415,6 +666,8 @@ class _TimelinePageState extends State<TimelinePage> {
                                 ),
                               if (post['postId'] != null)
                                 _buildReactionButtons(post['postId']),
+                              if (post['postId'] != null)
+                                _buildCommentSection(post['postId']),
                             ],
                           ),
                           trailing: IconButton(

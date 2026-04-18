@@ -17,12 +17,14 @@ class DecimalEncoder(json.JSONEncoder):
 TABLE_NAME = os.environ.get('TABLE_NAME')
 USER_TABLE_NAME = os.environ.get('USER_TABLE_NAME')
 REACTION_TABLE_NAME = os.environ.get('REACTION_TABLE_NAME')
+COMMENT_TABLE_NAME = os.environ.get('COMMENT_TABLE_NAME')
 BUCKET_NAME = os.environ.get('BUCKET_NAME')
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(TABLE_NAME)
 user_table = dynamodb.Table(USER_TABLE_NAME)
 reaction_table = dynamodb.Table(REACTION_TABLE_NAME)
+comment_table = dynamodb.Table(COMMENT_TABLE_NAME)
 
 # AI関連のクライアント
 transcribe = boto3.client('transcribe')
@@ -250,6 +252,62 @@ def lambda_handler(event, context):
                 grouped[rt]['users'].append(r.get('userId'))
             
             return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(grouped)}
+
+        # ----------------------------------------
+        # 8. コメント追加 (POST /comments)
+        # ----------------------------------------
+        elif resource == '/comments' and http_method == 'POST':
+            body = json.loads(event.get('body', '{}'))
+            post_id = body.get('postId')
+            user_id = body.get('userId')
+            user_name = body.get('userName', '名無しライオン')
+            content = body.get('content', '')
+            parent_comment_id = body.get('parentCommentId')
+            
+            comment_id = str(uuid.uuid4())
+            
+            comment_table.put_item(Item={
+                'commentId': comment_id,
+                'postId': post_id,
+                'userId': user_id,
+                'userName': user_name,
+                'content': content,
+                'parentCommentId': parent_comment_id,
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
+            })
+            
+            return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps({
+                'message': 'コメント追加！',
+                'commentId': comment_id
+            })}
+
+        # ----------------------------------------
+        # 9. コメント一覧取得 (GET /comments)
+        # ----------------------------------------
+        elif resource == '/comments' and http_method == 'GET':
+            post_id = query_params.get('postId')
+            
+            response = comment_table.scan(FilterExpression=Attr('postId').eq(post_id))
+            comments = response.get('Items', [])
+            
+            comments.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            
+            return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(comments, cls=DecimalEncoder)}
+
+        # ----------------------------------------
+        # 10. コメント削除 (DELETE /comments)
+        # ----------------------------------------
+        elif resource == '/comments' and http_method == 'DELETE':
+            comment_id = query_params.get('commentId')
+            user_id = query_params.get('userId')
+            
+            comment = comment_table.get_item(Key={'commentId': comment_id}).get('Item', {})
+            
+            if comment.get('userId') == user_id:
+                comment_table.delete_item(Key={'commentId': comment_id})
+                return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps({'message': 'コメント削除！'})}
+            else:
+                return {'statusCode': 403, 'headers': CORS_HEADERS, 'body': json.dumps({'message': '権限なし'})}
 
         return {'statusCode': 400, 'headers': CORS_HEADERS, 'body': json.dumps({'message': 'Unsupported method'})}
 
