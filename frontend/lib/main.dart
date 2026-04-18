@@ -76,6 +76,9 @@ class _TimelinePageState extends State<TimelinePage> {
   
   // 🌟 追加：リアクションのキャッシュと自分のユーザーID
   final Map<String, Map<String, dynamic>> _reactionsCache = {};
+  // main.dart の _TimelinePageState クラス内
+  final Map<String, List<dynamic>> _commentsCache = {}; // 🌟 コメント保存用
+  final Map<String, TextEditingController> _commentControllers = {}; // 🌟 入力欄管理用
   String? _currentUserId;
 
   @override
@@ -142,6 +145,8 @@ class _TimelinePageState extends State<TimelinePage> {
         final postId = post['postId'] as String?;
         if (postId != null) {
           _loadReactions(postId);
+          _loadComments(postId); // 🌟 これを追加！
+          _commentControllers.putIfAbsent(postId, () => TextEditingController());
         }
       }
     } catch (e) {
@@ -161,6 +166,40 @@ class _TimelinePageState extends State<TimelinePage> {
       setState(() => _reactionsCache[postId] = data);
     } catch (e) {
       print("リアクション取得エラー: $e");
+    }
+  }
+
+  // 🌟 追加：コメントを取得する
+  Future<void> _loadComments(String postId) async {
+    try {
+      final res = await Amplify.API.get('comments', queryParameters: {'postId': postId}).response;
+      final List<dynamic> data = jsonDecode(res.decodeBody());
+      setState(() => _commentsCache[postId] = data);
+    } catch (e) {
+      print("コメント取得エラー: $e");
+    }
+  }
+
+  // 🌟 追加：コメントを投稿する
+  Future<void> _postComment(String postId) async {
+    final controller = _commentControllers[postId];
+    if (controller == null || controller.text.isEmpty) return;
+    
+    final content = controller.text;
+    controller.clear(); // 🌟 送信ボタンを押したらすぐ消す！
+
+    try {
+      final user = await Amplify.Auth.getCurrentUser();
+      await Amplify.API.post('comments', body: HttpPayload.json({
+        'postId': postId,
+        'userId': user.userId,
+        'userName': 'サバンナの仲間', // 🌟 ここは本来プロフから取ると最高
+        'content': content,
+      })).response;
+      
+      _loadComments(postId); // 🌟 投稿が終わったらリストを更新
+    } catch (e) {
+      print("コメント投稿エラー: $e");
     }
   }
 
@@ -298,6 +337,44 @@ Future<void> _stopAndUpload() async {
       ),
     );
   }
+  // 🌟 追加：コメントエリアのUI
+  Widget _buildCommentSection(String postId) {
+    final comments = _commentsCache[postId] ?? [];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(),
+        ...comments.map((c) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2.0),
+          child: RichText(
+            text: TextSpan(
+              style: const TextStyle(fontSize: 13, color: Colors.white),
+              children: [
+                TextSpan(text: "${c['userName']}: ", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
+                TextSpan(text: c['content']),
+              ],
+            ),
+          ),
+        )),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _commentControllers[postId],
+                decoration: const InputDecoration(hintText: 'コメント...', isDense: true),
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.send, size: 20, color: Colors.orange),
+              onPressed: () => _postComment(postId),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   // 🌟 追加：各リアクションボタンのデザインと動作
   Widget _reactionChip(
@@ -405,27 +482,33 @@ Future<void> _stopAndUpload() async {
                             post['userName'] ?? '名無し',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
+                          // main.dart の 290行目付近にある subtitle: Column(...) の中身
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 _formatTimestamp(post['timestamp']),
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
-                                ),
+                                style: const TextStyle(fontSize: 12, color: Colors.grey),
                               ),
                               Text(
                                 "Power: ${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB",
                               ),
-                              if (post['transcript'] != null &&
-                                  post['transcript'].isNotEmpty)
-                                Text(
-                                  "🗣️ 「${post['transcript']}」",
-                                  style: const TextStyle(color: Colors.white70),
+                              
+                              // 🌟 修正：文字起こしテキストを大きく・太字にする！
+                              if (post['transcript'] != null && post['transcript'].isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 10.0),
+                                  child: Text(
+                                    "🗣️ 「${post['transcript']}」",
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 22, // 👈 以前よりかなり大きくしました
+                                      fontWeight: FontWeight.bold, // 👈 太字で強調！
+                                    ),
+                                  ),
                                 ),
-                              if (post['aiAdvice'] != null &&
-                                  post['aiAdvice'].isNotEmpty)
+
+                              if (post['aiAdvice'] != null && post['aiAdvice'].isNotEmpty)
                                 Container(
                                   margin: const EdgeInsets.only(top: 5),
                                   padding: const EdgeInsets.all(8),
@@ -436,14 +519,17 @@ Future<void> _stopAndUpload() async {
                                   ),
                                   child: Text(
                                     "🦁 AI師匠: ${post['aiAdvice']}",
-                                    style: const TextStyle(
-                                      color: Colors.orangeAccent,
-                                    ),
+                                    style: const TextStyle(color: Colors.orangeAccent),
                                   ),
                                 ),
-                              // 🌟 追加：ここにリアクションボタンを表示する
+                                
+                              // 🌟 既存のリアクションボタン
                               if (post['postId'] != null)
                                 _buildReactionButtons(post['postId']),
+                                
+                              // 🌟 追加：コメントセクションを表示する（ここが手順5のメイン！）
+                              if (post['postId'] != null)
+                                _buildCommentSection(post['postId']),
                             ],
                           ),
                           trailing: IconButton(

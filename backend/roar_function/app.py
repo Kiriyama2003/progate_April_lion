@@ -8,7 +8,6 @@ from datetime import datetime
 import decimal
 from boto3.dynamodb.conditions import Attr
 
-# 🌟 修正：region_name を 'us-east-1' に変更する！
 bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
 
 class DecimalEncoder(json.JSONEncoder):
@@ -17,15 +16,21 @@ class DecimalEncoder(json.JSONEncoder):
             return int(obj) if obj % 1 == 0 else float(obj)
         return super(DecimalEncoder, self).default(obj)
 
+# app.py の冒頭
+dynamodb = boto3.resource('dynamodb')
+
+# 🌟 修正：SAMが自動で名前を流し込んでくれるので、この書き方でOK！
 TABLE_NAME = os.environ.get('TABLE_NAME')
 USER_TABLE_NAME = os.environ.get('USER_TABLE_NAME')
-BUCKET_NAME = os.environ.get('BUCKET_NAME')
-REACTION_TABLE_NAME = os.environ.get('REACTION_TABLE_NAME') # 👈 追加
+REACTION_TABLE_NAME = os.environ.get('REACTION_TABLE_NAME')
+COMMENT_TABLE_NAME = os.environ.get('COMMENT_TABLE_NAME')
 
-dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(TABLE_NAME)
 user_table = dynamodb.Table(USER_TABLE_NAME)
-reaction_table = dynamodb.Table(REACTION_TABLE_NAME) # 👈 追加
+reaction_table = dynamodb.Table(REACTION_TABLE_NAME)
+comment_table = dynamodb.Table(COMMENT_TABLE_NAME)
+
+BUCKET_NAME = os.environ.get('BUCKET_NAME')
 
 # AI関連のクライアント
 transcribe = boto3.client('transcribe', region_name='us-east-1')
@@ -274,6 +279,33 @@ def lambda_handler(event, context):
                 grouped[rt]['users'].append(r.get('userId'))
             
             return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(grouped)}
+
+
+        # --- 8. コメント投稿 (POST /comments) ---
+        elif resource == '/comments' and http_method == 'POST':
+            body = json.loads(event.get('body', '{}'))
+            comment_id = str(uuid.uuid4())
+            item = {
+                'commentId': comment_id,
+                'postId': body.get('postId'),
+                'userId': body.get('userId'),
+                'userName': body.get('userName', '名無しライオン'),
+                'content': body.get('content'), # 🌟 コメント本文
+                'timestamp': datetime.utcnow().isoformat() + 'Z'
+            }
+            comment_table.put_item(Item=item)
+            return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(item)}
+
+        # --- 9. コメント取得 (GET /comments) ---
+        elif resource == '/comments' and http_method == 'GET':
+            post_id = query_params.get('postId')
+            # 特定の投稿に紐づくコメントを検索
+            response = comment_table.scan(FilterExpression=Attr('postId').eq(post_id))
+            comments = response.get('Items', [])
+            # 古い順（または新しい順）に並び替え
+            comments.sort(key=lambda x: x['timestamp'])
+            return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(comments)}
+
 
         return {'statusCode': 400, 'headers': CORS_HEADERS, 'body': json.dumps({'message': 'Unsupported method'})}
 

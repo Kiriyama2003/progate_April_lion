@@ -59,11 +59,13 @@ Resources:
           USER_TABLE_NAME: !Ref UserTable # 👈 追加
           BUCKET_NAME: !Ref SavannahBucket
           REACTION_TABLE_NAME: !Ref ReactionTable
+          COMMENT_TABLE_NAME: !Ref CommentTable
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref RoarTable }
-        - DynamoDBCrudPolicy: { TableName: !Ref UserTable } # 👈 権限追加
-        - DynamoDBCrudPolicy: { TableName: !Ref ReactionTable } # 👈 権限追加
+        - DynamoDBCrudPolicy: { TableName: !Ref UserTable } 
+        - DynamoDBCrudPolicy: { TableName: !Ref ReactionTable } 
         - S3FullAccessPolicy: { BucketName: !Ref SavannahBucket }
+        - DynamoDBCrudPolicy: { TableName: !Ref CommentTable}
         - AmazonBedrockFullAccess
         - Statement: # 🌟 NEW: Transcribeを使えるようにする権限
             - Effect: Allow
@@ -94,6 +96,12 @@ Resources:
         DeleteReactions:
           Type: Api
           Properties: { Path: /reactions, Method: delete, RestApiId: !Ref ServerlessRestApi }
+        GetComments:
+          Type: Api
+          Properties: { Path: /comments, Method: get, RestApiId: !Ref ServerlessRestApi }
+        PostComments:
+          Type: Api
+          Properties: { Path: /comments, Method: post, RestApiId: !Ref ServerlessRestApi }
 
   IdentityPool:
     Type: AWS::Cognito::IdentityPool
@@ -157,6 +165,12 @@ Resources:
     Properties:
       PrimaryKey:
         Name: reactionId
+        Type: String
+  CommentTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: commentId
         Type: String
 Outputs:
   ApiUrl:
