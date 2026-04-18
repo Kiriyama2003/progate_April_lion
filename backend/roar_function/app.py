@@ -32,36 +32,55 @@ CORS_HEADERS = {
     'Access-Control-Allow-Methods': '*'
 }
 
-# --- 🎙️ 1. 文字起こし関数 ---
+# --- 🎙️ 1. 文字起こし関数（詳細デバッグ版） ---
 def transcribe_audio(s3_key):
     job_name = f"roar_transcribe_{uuid.uuid4()}"
     job_uri = f"s3://{BUCKET_NAME}/{s3_key}"
     
+    print(f"[DEBUG 1] 文字起こし開始: job={job_name}, uri={job_uri}")
+    
     try:
-        transcribe.start_transcription_job(
+        # ジョブの登録
+        response = transcribe.start_transcription_job(
             TranscriptionJobName=job_name,
             Media={'MediaFileUri': job_uri},
-            MediaFormat='m4a', # Flutterからの形式に合わせる
+            MediaFormat='m4a',
             LanguageCode='ja-JP'
         )
+        print(f"[DEBUG 2] ジョブ登録成功！ステータス: {response['TranscriptionJob']['TranscriptionJobStatus']}")
         
-        # 完了するまで待つ（簡易的なポーリング）
+        # 完了待ちループ
+        loop_count = 0
         while True:
             status = transcribe.get_transcription_job(TranscriptionJobName=job_name)
             job_status = status['TranscriptionJob']['TranscriptionJobStatus']
+            
+            loop_count += 1
+            print(f"[DEBUG 3-{loop_count}] 確認中... 現在のステータス: {job_status}")
+            
             if job_status in ['COMPLETED', 'FAILED']:
                 break
-            time.sleep(2) # 2秒待って再確認
+            time.sleep(2) # 2秒待機
+            
+        print(f"[DEBUG 4] ループ終了。最終ステータス: {job_status}")
             
         if job_status == 'COMPLETED':
             transcript_uri = status['TranscriptionJob']['Transcript']['TranscriptFileUri']
-            # 結果のJSONをダウンロードしてテキストを抽出
-            with urllib.request.urlopen(transcript_uri) as response:
-                data = json.loads(response.read().decode())
-                return data['results']['transcripts'][0]['transcript']
-        return "（言葉にならない咆哮）"
+            print(f"[DEBUG 5] 結果URL取得: {transcript_uri}")
+            
+            with urllib.request.urlopen(transcript_uri) as res:
+                data = json.loads(res.read().decode())
+                text = data['results']['transcripts'][0]['transcript']
+                print(f"[DEBUG 6] 抽出成功！テキスト: {text}")
+                return text
+        else:
+            # FAILEDの場合、失敗理由を取得
+            failure_reason = status['TranscriptionJob'].get('FailureReason', '理由不明')
+            print(f"[DEBUG 🚨 FAILED] 失敗理由: {failure_reason}")
+            return "（文字起こし失敗だガオ）"
+
     except Exception as e:
-        print(f"Transcribe Error: {e}")
+        print(f"[DEBUG 🚨 EXCEPTION] プログラムエラー発生: {str(e)}")
         return "（文字起こし失敗だガオ）"
 
 # --- 🦁 2. AIアドバイス生成関数 ---
