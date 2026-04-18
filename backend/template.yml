@@ -63,6 +63,12 @@ Resources:
         - DynamoDBCrudPolicy: { TableName: !Ref UserTable } # 👈 権限追加
         - S3FullAccessPolicy: { BucketName: !Ref SavannahBucket }
         - AmazonBedrockFullAccess
+        - Statement: # 🌟 NEW: Transcribeを使えるようにする権限
+            - Effect: Allow
+              Action:
+                - transcribe:StartTranscriptionJob
+                - transcribe:GetTranscriptionJob
+              Resource: "*"
       Events:
         PostRoar:
           Type: Api
