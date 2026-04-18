@@ -10,7 +10,7 @@ import 'package:amplify_authenticator/amplify_authenticator.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:image_picker/image_picker.dart'; // 🌟 NEW: 画像選択用
+import 'package:image_picker/image_picker.dart';
 
 import 'amplifyconfiguration.dart';
 
@@ -61,10 +61,44 @@ class _TimelinePageState extends State<TimelinePage> {
   double _maxAmplitude = -100.0;
   Timer? _amplitudeTimer;
 
+  // 🌟 追加：アバターURLのキャッシュ
+  final Map<String, String> _avatarUrlCache = {};
+
   @override
   void initState() {
     super.initState();
     _fetchTimeline();
+  }
+
+  // 🌟 追加：S3キーから画像URLを取得してキャッシュに保存
+  Future<void> _loadAvatarUrl(String s3Key) async {
+    if (s3Key.isEmpty || _avatarUrlCache.containsKey(s3Key)) return;
+    try {
+      final result = await Amplify.Storage.getUrl(key: s3Key).result;
+      setState(() {
+        _avatarUrlCache[s3Key] = result.url.toString();
+      });
+    } catch (e) {
+      print("アバター取得失敗: $e");
+    }
+  }
+
+  // 🌟 追加：時間を「日時分秒」に整形する関数
+  String _formatTimestamp(String? timestamp) {
+    if (timestamp == null || timestamp.isEmpty) return '';
+    try {
+      // タイムスタンプをローカル時間（日本時間など）に変換
+      final dateTime = DateTime.parse(timestamp).toLocal();
+      final year = dateTime.year;
+      final month = dateTime.month.toString().padLeft(2, '0');
+      final day = dateTime.day.toString().padLeft(2, '0');
+      final hour = dateTime.hour.toString().padLeft(2, '0');
+      final minute = dateTime.minute.toString().padLeft(2, '0');
+      final second = dateTime.second.toString().padLeft(2, '0');
+      return '$year/$month/$day $hour:$minute:$second';
+    } catch (e) {
+      return timestamp;
+    }
   }
 
   Future<void> _fetchTimeline() async {
@@ -73,6 +107,13 @@ class _TimelinePageState extends State<TimelinePage> {
       final List<dynamic> data = jsonDecode(res.decodeBody());
       data.sort((a, b) => (b['timestamp'] ?? "").compareTo(a['timestamp'] ?? ""));
       setState(() => _posts = data);
+
+      // 🌟 追加：投稿データ取得後、各投稿者のアバターURLを読み込む
+      for (var post in data) {
+        if (post['avatarS3Key'] != null) {
+          _loadAvatarUrl(post['avatarS3Key']);
+        }
+      }
     } catch (e) { print("取得エラー: $e"); }
   }
 
@@ -132,11 +173,11 @@ class _TimelinePageState extends State<TimelinePage> {
         title: const Text('🦁 タイムライン'),
         actions: [
           IconButton(onPressed: _fetchTimeline, icon: const Icon(Icons.refresh)),
-          // 自分のプロフィールへ飛ぶボタン
           IconButton(
             icon: const Icon(Icons.person),
             onPressed: () async {
               final user = await Amplify.Auth.getCurrentUser();
+              if (!mounted) return;
               Navigator.push(context, MaterialPageRoute(builder: (context) => UserProfilePage(userId: user.userId)));
             },
           ),
@@ -166,16 +207,30 @@ class _TimelinePageState extends State<TimelinePage> {
                 itemCount: _posts.length,
                 itemBuilder: (context, index) {
                   final post = _posts[index];
+                  // 🌟 追加：キャッシュから画像URLを取り出す
+                  final avatarS3Key = post['avatarS3Key'] as String?;
+                  final avatarUrl = _avatarUrlCache[avatarS3Key];
+
                   return Card(
                     margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     child: ListTile(
-                      // 🌟 アイコンタップでプロフィールへ遷移！
+                      // 🌟 修正：画像を表示するように変更
                       leading: InkWell(
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => UserProfilePage(userId: post['userId']))),
-                        child: const CircleAvatar(child: Icon(Icons.pets)),
+                        child: CircleAvatar(
+                          backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                          child: avatarUrl == null ? const Icon(Icons.pets) : null,
+                        ),
                       ),
                       title: Text(post['userName'] ?? '名無し', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text("Power: ${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB"),
+                      // 🌟 修正：日時分秒の表示を適用
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_formatTimestamp(post['timestamp']), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                          Text("Power: ${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB"),
+                        ],
+                      ),
                       trailing: IconButton(
                         icon: const Icon(Icons.play_circle_fill, size: 40, color: Colors.orange),
                         onPressed: () => _playS3(post['s3Key']),
@@ -223,17 +278,14 @@ class _UserProfilePageState extends State<UserProfilePage> {
       final currentUser = await Amplify.Auth.getCurrentUser();
       _isMe = currentUser.userId == widget.userId;
 
-      // 1. プロフィール情報を取得
       final profRes = await Amplify.API.get('profile', queryParameters: {'userId': widget.userId}).response;
       _profile = jsonDecode(profRes.decodeBody());
 
-      // S3に画像があればURLを発行
       if (_profile['avatarS3Key'] != null && _profile['avatarS3Key'] != '') {
         final urlResult = await Amplify.Storage.getUrl(key: _profile['avatarS3Key']).result;
         _avatarUrl = urlResult.url.toString();
       }
 
-      // 2. そのユーザーのタイムラインだけを取得
       final postRes = await Amplify.API.get('timeline', queryParameters: {'userId': widget.userId}).response;
       final List<dynamic> data = jsonDecode(postRes.decodeBody());
       data.sort((a, b) => (b['timestamp'] ?? "").compareTo(a['timestamp'] ?? ""));
@@ -245,7 +297,23 @@ class _UserProfilePageState extends State<UserProfilePage> {
     setState(() => _isLoading = false);
   }
 
-  // プロフィール編集ダイアログ
+  // 🌟 追加：時間を「日時分秒」に整形する関数（プロフィール画面の投稿一覧用）
+  String _formatTimestamp(String? timestamp) {
+    if (timestamp == null || timestamp.isEmpty) return '';
+    try {
+      final dateTime = DateTime.parse(timestamp).toLocal();
+      final year = dateTime.year;
+      final month = dateTime.month.toString().padLeft(2, '0');
+      final day = dateTime.day.toString().padLeft(2, '0');
+      final hour = dateTime.hour.toString().padLeft(2, '0');
+      final minute = dateTime.minute.toString().padLeft(2, '0');
+      final second = dateTime.second.toString().padLeft(2, '0');
+      return '$year/$month/$day $hour:$minute:$second';
+    } catch (e) {
+      return timestamp;
+    }
+  }
+
   Future<void> _editProfile() async {
     final nameController = TextEditingController(text: _profile['userName'] ?? '');
     String newAvatarKey = _profile['avatarS3Key'] ?? '';
@@ -281,13 +349,12 @@ class _UserProfilePageState extends State<UserProfilePage> {
             onPressed: () async {
               Navigator.pop(context);
               setState(() => _isLoading = true);
-              // プロフィールを保存 (POST)
               await Amplify.API.post('profile', body: HttpPayload.json({
                 "userId": widget.userId,
                 "userName": nameController.text,
                 "avatarS3Key": newAvatarKey,
               })).response;
-              _loadData(); // 再読み込み
+              _loadData();
             },
             child: const Text('保存'),
           )
@@ -309,7 +376,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
       appBar: AppBar(title: Text('${_profile['userName'] ?? '名無し'}のページ')),
       body: Column(
         children: [
-          // 👑 上部：Twitter風プロフィールヘッダー
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(20),
@@ -335,7 +401,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
             ),
           ),
           const Divider(height: 1),
-          // 📜 下部：そのユーザーだけの投稿一覧
           Expanded(
             child: ListView.builder(
               itemCount: _userPosts.length,
@@ -345,7 +410,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
                   margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   child: ListTile(
                     leading: const Icon(Icons.mic),
-                    title: Text(post['timestamp']?.toString().split('T').first ?? ''),
+                    // 🌟 修正：プロフィール画面の過去の投稿一覧にもフォーマットした時間を適用
+                    title: Text(_formatTimestamp(post['timestamp']), style: const TextStyle(fontSize: 14)),
                     subtitle: Text("Power: ${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB"),
                     trailing: IconButton(
                       icon: const Icon(Icons.play_circle_fill, size: 40, color: Colors.orange),

@@ -55,14 +55,26 @@ def lambda_handler(event, context):
         elif resource == '/timeline' and http_method == 'GET':
             user_id = query_params.get('userId')
             
-            # userIdが指定されていればその人だけ、なければ全員分！
             if user_id:
                 response = table.scan(FilterExpression=Attr('userId').eq(user_id))
             else:
                 response = table.scan()
+            posts = response.get('Items', [])
+
+            # 🌟 ここで「最新のユーザー情報」をすべて取得
+            user_response = user_table.scan()
+            users = {u['userId']: u for u in user_response.get('Items', [])}
+
+            # 🌟 投稿データの名前を、最新のユーザー情報の名前で上書きする！
+            for post in posts:
+                uid = post.get('userId')
+                if uid in users:
+                    # 最新の名前があれば上書き。なければ投稿時の名前を使う
+                    post['userName'] = users[uid].get('userName', post.get('userName', '名無し'))
+                    # ついでにアバターのキーも渡せるようにしておくと便利
+                    post['avatarS3Key'] = users[uid].get('avatarS3Key', '')
                 
-            items = response.get('Items', [])
-            return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(items, cls=DecimalEncoder)}
+            return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(posts, cls=DecimalEncoder)}
 
         # ----------------------------------------
         # 3. プロフィール更新 (POST /profile)
