@@ -12,17 +12,24 @@ frontend:
   phases:
     preBuild:
       commands:
-        - mkdir -p frontend/lib
+        # 1. 最初に設定ファイルを作る
         - echo "$AMPLIFYCONFIG" > frontend/lib/amplifyconfiguration.dart
+        
+        # 2. Flutterの準備
         - git clone https://github.com/flutter/flutter.git -b stable
         - export PATH="$PATH:`pwd`/flutter/bin"
-        # 🌟 ここから変更：移動と実行を「&&」でワンセットにする！
-        - cd frontend && flutter config --enable-web
-        - cd frontend && flutter pub get
+        
+        # 🌟 3. ここで「1回だけ」frontendフォルダに入る！
+        - cd frontend
+        
+        # 4. すでに中にいるので、あとは普通にコマンドを打つだけ
+        - flutter config --enable-web
+        - flutter pub get
     build:
       commands:
-        # 🌟 ここもワンセット！
-        - cd frontend && flutter build web --release
+        # 🌟 buildフェーズはまた一番上からスタートするので、もう一度入る
+        - cd frontend
+        - flutter build web --release
   artifacts:
     baseDirectory: frontend/build/web
     files:
