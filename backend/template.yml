@@ -65,13 +65,13 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.11
       Timeout: 60
-        Environment:
-          Variables:
-            TABLE_NAME: !Ref RoarTable
-            USER_TABLE_NAME: !Ref UserTable
-            REACTION_TABLE_NAME: !Ref ReactionTable
-            COMMENT_TABLE_NAME: !Ref CommentTable
-            BUCKET_NAME: !Ref SavannahBucket
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref RoarTable
+          USER_TABLE_NAME: !Ref UserTable
+          REACTION_TABLE_NAME: !Ref ReactionTable
+          COMMENT_TABLE_NAME: !Ref CommentTable
+          BUCKET_NAME: !Ref SavannahBucket
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref RoarTable }
         - DynamoDBCrudPolicy: { TableName: !Ref UserTable }
