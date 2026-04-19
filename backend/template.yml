@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Gao Gao Savannah Backend
+
+Globals:
+  Function:
+    Timeout: 60
+  Api:
+    Cors:
+      AllowMethods: "'*'"
+      AllowHeaders: "'*'"
+      AllowOrigin: "'*'"
+
+Resources:
+  SavannahBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "gaogao-savannah-${AWS::AccountId}"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+
+  # 🌟 既存の投稿テーブル
+  RoarTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey: { Name: postId, Type: String }
+
+  # 🌟 NEW: ユーザー情報（プロフィール）テーブルを追加！
+  UserTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey: { Name: userId, Type: String }
+
+  GaoGaoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+
+  GaoGaoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref GaoGaoUserPool
+      ClientName: GaoGaoAppClient
+
+  GaoGaoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: roar_function/
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Timeout: 60
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref RoarTable
+          USER_TABLE_NAME: !Ref UserTable # 👈 追加
+          BUCKET_NAME: !Ref SavannahBucket
+          REACTION_TABLE_NAME: !Ref ReactionTable
+          COMMENT_TABLE_NAME: !Ref CommentTable
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref RoarTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref UserTable } 
+        - DynamoDBCrudPolicy: { TableName: !Ref ReactionTable } 
+        - S3FullAccessPolicy: { BucketName: !Ref SavannahBucket }
+        - DynamoDBCrudPolicy: { TableName: !Ref CommentTable}
+        - AmazonBedrockFullAccess
+        - Statement: # 🌟 NEW: Transcribeを使えるようにする権限
+            - Effect: Allow
+              Action:
+                - transcribe:StartTranscriptionJob
+                - transcribe:GetTranscriptionJob
+              Resource: "*"
+      Events:
+        PostRoar:
+          Type: Api
+          Properties: { Path: /roars, Method: post, RestApiId: !Ref ServerlessRestApi }
+        GetTimeline:
+          Type: Api
+          Properties: { Path: /timeline, Method: get, RestApiId: !Ref ServerlessRestApi }
+        # 🌟 NEW: プロフィール用のAPIを追加
+        GetProfile:
+          Type: Api
+          Properties: { Path: /profile, Method: get, RestApiId: !Ref ServerlessRestApi }
+        PostProfile:
+          Type: Api
+          Properties: { Path: /profile, Method: post, RestApiId: !Ref ServerlessRestApi }
+        GetReactions:
+          Type: Api
+          Properties: { Path: /reactions, Method: get, RestApiId: !Ref ServerlessRestApi }
+        PostReactions:
+          Type: Api
+          Properties: { Path: /reactions, Method: post, RestApiId: !Ref ServerlessRestApi }
+        DeleteReactions:
+          Type: Api
+          Properties: { Path: /reactions, Method: delete, RestApiId: !Ref ServerlessRestApi }
+        GetComments:
+          Type: Api
+          Properties: { Path: /comments, Method: get, RestApiId: !Ref ServerlessRestApi }
+        PostComments:
+          Type: Api
+          Properties: { Path: /comments, Method: post, RestApiId: !Ref ServerlessRestApi }
+
+  IdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      AllowUnauthenticatedIdentities: true
+      CognitoIdentityProviders:
+        - ClientId: !Ref GaoGaoUserPoolClient
+          ProviderName: !GetAtt GaoGaoUserPool.ProviderName
+
+  IdentityPoolRoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref IdentityPool
+      Roles:
+        unauthenticated: !GetAtt UnauthRole.Arn
+        authenticated: !GetAtt AuthRole.Arn
+
+  UnauthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: cognito-identity.amazonaws.com }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals: { "cognito-identity.amazonaws.com:aud": !Ref IdentityPool }
+              ForAnyValue:StringLike: { "cognito-identity.amazonaws.com:amr": unauthenticated }
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ["s3:PutObject", "s3:GetObject"]
+                Resource: !Sub "arn:aws:s3:::${SavannahBucket}/*"
+
+  AuthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: cognito-identity.amazonaws.com }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals: { "cognito-identity.amazonaws.com:aud": !Ref IdentityPool }
+              ForAnyValue:StringLike: { "cognito-identity.amazonaws.com:amr": authenticated }
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ["s3:PutObject", "s3:GetObject"]
+                Resource: !Sub "arn:aws:s3:::${SavannahBucket}/*"
+  ReactionTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: reactionId
+        Type: String
+  CommentTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: commentId
+        Type: String
+Outputs:
+  ApiUrl:
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
