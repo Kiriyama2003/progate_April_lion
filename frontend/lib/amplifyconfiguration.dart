@@ -6,9 +6,9 @@ const amplifyconfig = ''' {
             "awsAPIPlugin": {
                 "GaoGaoApi": {
                     "endpointType": "REST",
-                    "endpoint": "https://49o9nsv8y1.execute-api.us-east-1.amazonaws.com/Prod",
+                    "endpoint": "https://5i7bmh9lh1.execute-api.us-east-1.amazonaws.com/Prod/",
                     "region": "us-east-1",
-                    "authorizationType": "NONE"
+                    "authorizationType": "AWS_IAM"
                 }
             }
         }
@@ -24,15 +24,15 @@ const amplifyconfig = ''' {
                 "CredentialsProvider": {
                     "CognitoIdentity": {
                         "Default": {
-                            "PoolId": "us-east-1:c9373283-b22f-44e0-aa71-84e014f7543b",
+                            "PoolId": "us-east-1:acccb220-84e7-4a61-a6bc-64049384a8df",
                             "Region": "us-east-1"
                         }
                     }
                 },
                 "CognitoUserPool": {
                     "Default": {
-                        "PoolId": "us-east-1_KBL1yPFS7",
-                        "AppClientId": "4k60qnndgfjavbr9vigthlrpad",
+                        "PoolId": "us-east-1_Hv2r53RJf",
+                        "AppClientId": "79u4ehiijgmvb80llnalpq4i3j",
                         "Region": "us-east-1"
                     }
                 },
