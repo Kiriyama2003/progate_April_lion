@@ -174,7 +174,7 @@ def lambda_handler(event, context):
                 })
             }
 
-        # ----------------------------------------
+# ----------------------------------------
         # 2. タイムライン取得 (GET /timeline)
         # ----------------------------------------
         elif resource == '/timeline' and http_method == 'GET':
@@ -185,6 +185,15 @@ def lambda_handler(event, context):
             else:
                 response = table.scan()
             posts = response.get('Items', [])
+
+            # 🌟 追加1: リアクションを一括取得して、各投稿ごとの合計数を計算する
+            reaction_response = reaction_table.scan()
+            reactions = reaction_response.get('Items', [])
+            reaction_counts = {}
+            for r in reactions:
+                pid = r.get('postId')
+                if pid:
+                    reaction_counts[pid] = reaction_counts.get(pid, 0) + 1
 
             # 🌟 ここで「最新のユーザー情報」をすべて取得
             user_response = user_table.scan()
@@ -198,6 +207,9 @@ def lambda_handler(event, context):
                     post['userName'] = users[uid].get('userName', post.get('userName', '名無し'))
                     # ついでにアバターのキーも渡せるようにしておくと便利
                     post['avatarS3Key'] = users[uid].get('avatarS3Key', '')
+                
+                # 🌟 追加2: 投稿データに「リアクション合計数」をくっつける！
+                post['totalReactions'] = reaction_counts.get(post.get('postId'), 0)
                 
             return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': json.dumps(posts, cls=DecimalEncoder)}
 

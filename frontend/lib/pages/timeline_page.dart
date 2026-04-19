@@ -11,8 +11,11 @@ import 'package:amplify_authenticator/amplify_authenticator.dart';
 
 import '../utils/format_utils.dart';
 import '../widgets/lion_painter.dart';
-import '../widgets/roar_loading_overlay.dart'; // 🌟 これを追加！
+import '../widgets/roar_loading_overlay.dart';
 import 'profile_page.dart';
+
+// 🌟 並び替えのモードを定義
+enum SortMode { latest, popular, power }
 
 // ======================================================================
 // 🦁 1. メインのタイムライン画面
@@ -31,27 +34,30 @@ class _TimelinePageState extends State<TimelinePage> {
   double _maxAmplitude = -100.0;
   Timer? _amplitudeTimer;
 
-  // 🌟 追加：修行中（処理中）かどうかを判定するフラグと安全装置タイマー
+  // 🌟 追加：15秒制限とカウントダウン用の変数
+  Timer? _maxRecordTimer;
+  Timer? _countdownTimer;
+  int _remainingSeconds = 15;
+
   bool _isProcessing = false;
   Timer? _timeoutTimer;
 
-  // アバターURLのキャッシュ
+  // 現在の並び替えモード（初期値は「最新」）
+  SortMode _currentSortMode = SortMode.latest;
+
   final Map<String, String> _avatarUrlCache = {};
-  
-  // リアクションのキャッシュと自分のユーザーID
   final Map<String, Map<String, dynamic>> _reactionsCache = {};
-  final Map<String, List<dynamic>> _commentsCache = {}; // コメント保存用
-  final Map<String, TextEditingController> _commentControllers = {}; // 入力欄管理用
+  final Map<String, List<dynamic>> _commentsCache = {};
+  final Map<String, TextEditingController> _commentControllers = {};
   String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
-    _initUserId(); // 起動時に自分のIDを取得
+    _initUserId();
     _fetchTimeline();
   }
 
-  // 自分のユーザーIDを保持しておく関数
   Future<void> _initUserId() async {
     try {
       final user = await Amplify.Auth.getCurrentUser();
@@ -63,7 +69,6 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  // S3キーから画像URLを取得してキャッシュに保存
   Future<void> _loadAvatarUrl(String s3Key) async {
     if (s3Key.isEmpty || _avatarUrlCache.containsKey(s3Key)) return;
     try {
@@ -78,7 +83,6 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  // 時間を「日時分秒」に整形する関数
   String _formatTimestamp(String? timestamp) {
     if (timestamp == null || timestamp.isEmpty) return '';
     try {
@@ -95,22 +99,33 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
+  // リストを並び替える専用の関数
+  void _applySorting() {
+    setState(() {
+      if (_currentSortMode == SortMode.latest) {
+        _posts.sort((a, b) => (b['timestamp'] ?? "").compareTo(a['timestamp'] ?? ""));
+      } else if (_currentSortMode == SortMode.popular) {
+        _posts.sort((a, b) => (b['totalReactions'] as num? ?? 0).compareTo(a['totalReactions'] as num? ?? 0));
+      } else if (_currentSortMode == SortMode.power) {
+        _posts.sort((a, b) => (b['roarPower'] as num? ?? -100).compareTo(a['roarPower'] as num? ?? -100));
+      }
+    });
+  }
+
   Future<void> _fetchTimeline() async {
     try {
       final res = await Amplify.API.get('timeline').response;
       final List<dynamic> data = jsonDecode(res.decodeBody());
-      data.sort(
-        (a, b) => (b['timestamp'] ?? "").compareTo(a['timestamp'] ?? ""),
-      );
+      
       if (mounted) {
         setState(() => _posts = data);
+        _applySorting(); 
       }
 
       for (var post in data) {
         if (post['avatarS3Key'] != null) {
           _loadAvatarUrl(post['avatarS3Key']);
         }
-        // 各投稿のリアクション・コメント情報を取得する
         final postId = post['postId'] as String?;
         if (postId != null) {
           _loadReactions(postId);
@@ -123,7 +138,6 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  // リアクション取得処理 (API GET /reactions)
   Future<void> _loadReactions(String postId) async {
     if (postId.isEmpty) return;
     try {
@@ -140,7 +154,6 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  // コメントを取得する
   Future<void> _loadComments(String postId) async {
     try {
       final res = await Amplify.API.get('comments', queryParameters: {'postId': postId}).response;
@@ -153,30 +166,28 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  // コメントを投稿する
   Future<void> _postComment(String postId) async {
     final controller = _commentControllers[postId];
     if (controller == null || controller.text.isEmpty) return;
     
     final content = controller.text;
-    controller.clear(); // 送信ボタンを押したらすぐ消す！
+    controller.clear(); 
 
     try {
       final user = await Amplify.Auth.getCurrentUser();
       await Amplify.API.post('comments', body: HttpPayload.json({
         'postId': postId,
         'userId': user.userId,
-        'userName': 'サバンナの仲間', // 🌟 ここは本来プロフから取ると最高
+        'userName': 'サバンナの仲間', 
         'content': content,
       })).response;
       
-      _loadComments(postId); // 投稿が終わったらリストを更新
+      _loadComments(postId); 
     } catch (e) {
       print("コメント投稿エラー: $e");
     }
   }
 
-  // リアクションの追加・削除処理
   Future<void> _toggleReaction(String postId, String reactionType) async {
     final userId = _currentUserId;
     if (userId == null) return;
@@ -217,7 +228,7 @@ class _TimelinePageState extends State<TimelinePage> {
           }),
         ).response;
       }
-      await _loadReactions(postId);
+      await _fetchTimeline();
     } catch (e) {
       print("リアクションエラー: $e");
     }
@@ -231,34 +242,61 @@ class _TimelinePageState extends State<TimelinePage> {
         path = '${dir.path}/roar_temp.m4a';
       }
       _maxAmplitude = -100.0;
+      _remainingSeconds = 15; // 🌟 録音開始時に残り時間を15秒にリセット
+      
       await _recorder.start(const RecordConfig(), path: path);
+      
       _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (
         _,
       ) async {
         final amp = await _recorder.getAmplitude();
         if (amp.current > _maxAmplitude) _maxAmplitude = amp.current;
       });
+
+      // 🌟 1秒ごとにカウントダウンするタイマー
+      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted && _remainingSeconds > 0) {
+          setState(() => _remainingSeconds--);
+        }
+      });
+
       if (mounted) {
         setState(() => _isRecording = true);
       }
+
+      // 🌟 15秒経ったら自動でストップしてアップロードするタイマー
+      _maxRecordTimer = Timer(const Duration(seconds: 15), () {
+        if (_isRecording) {
+          _stopAndUpload();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('熱意は伝わったぜ！15秒で自動投稿したガオ！🔥'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      });
     }
   }
 
-  // 🌟 録音停止・アップロード・AI処理を待つ
   Future<void> _stopAndUpload() async {
+    // 🌟 タイマーを全て解除してストップ
     _amplitudeTimer?.cancel();
+    _maxRecordTimer?.cancel();
+    _countdownTimer?.cancel();
+    
     final path = await _recorder.stop();
     if (mounted) {
       setState(() => _isRecording = false);
     }
     if (path == null) return;
 
-    // 🌟 修行（通信）開始！くるくるを表示させる
     if (mounted) {
       setState(() => _isProcessing = true);
     }
 
-    // 🌟 安全装置（タイマー）セット！1分後に強制終了
     _timeoutTimer = Timer(const Duration(minutes: 1), () {
       if (_isProcessing) {
         if (mounted) {
@@ -271,7 +309,6 @@ class _TimelinePageState extends State<TimelinePage> {
     try {
       final fileName = 'roars/${DateTime.now().millisecondsSinceEpoch}.m4a';
       
-      // アップロード
       await Amplify.Storage.uploadFile(
         localFile: AWSFile.fromPath(path),
         key: fileName, 
@@ -301,7 +338,6 @@ class _TimelinePageState extends State<TimelinePage> {
     } catch (e) {
       print("投稿エラー: $e");
     } finally {
-      // 🌟 成功しても失敗しても、修行終了！くるくるを消す
       _timeoutTimer?.cancel();
       if (mounted) {
         setState(() => _isProcessing = false);
@@ -314,7 +350,6 @@ class _TimelinePageState extends State<TimelinePage> {
     await _audioPlayer.play(UrlSource(result.url.toString()));
   }
 
-  // リアクションボタンのUI作成
   Widget _buildReactionButtons(String postId) {
     final reactions = _reactionsCache[postId] ?? {};
     
@@ -332,7 +367,6 @@ class _TimelinePageState extends State<TimelinePage> {
     );
   }
 
-  // コメントエリアのUI
   Widget _buildCommentSection(String postId) {
     final comments = _commentsCache[postId] ?? [];
     return Column(
@@ -371,7 +405,6 @@ class _TimelinePageState extends State<TimelinePage> {
     );
   }
 
-  // 各リアクションボタンのデザインと動作
   Widget _reactionChip(
     String postId,
     String type,
@@ -441,6 +474,33 @@ class _TimelinePageState extends State<TimelinePage> {
                       child: Icon(_isRecording ? Icons.stop : Icons.mic),
                     ),
                   ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: SegmentedButton<SortMode>(
+                  segments: const [
+                    ButtonSegment<SortMode>(value: SortMode.latest, label: Text('最新 🕒')),
+                    ButtonSegment<SortMode>(value: SortMode.popular, label: Text('人気 🔥')),
+                    ButtonSegment<SortMode>(value: SortMode.power, label: Text('パワー 📢')),
+                  ],
+                  selected: {_currentSortMode},
+                  onSelectionChanged: (Set<SortMode> newSelection) {
+                    setState(() {
+                      _currentSortMode = newSelection.first;
+                    });
+                    _applySorting(); 
+                  },
+                  style: ButtonStyle(
+                    backgroundColor: WidgetStateProperty.resolveWith<Color>(
+                      (Set<WidgetState> states) {
+                        if (states.contains(WidgetState.selected)) {
+                          return Colors.orange.withOpacity(0.4);
+                        }
+                        return Colors.transparent;
+                      },
+                    ),
+                  ),
                 ),
               ),
               Expanded(
@@ -587,10 +647,30 @@ class _TimelinePageState extends State<TimelinePage> {
                           ),
                         ),
                         const SizedBox(height: 10),
-                        const Text(
-                          '録音中...',
-                          style: TextStyle(fontSize: 18, color: Colors.white70),
+                        
+                        // 🌟 追加：残り時間のカウントダウンテキスト
+                        Text(
+                          '残り $_remainingSeconds 秒',
+                          style: const TextStyle(
+                            fontSize: 24, 
+                            fontWeight: FontWeight.bold, 
+                            color: Colors.white
+                          ),
                         ),
+                        const SizedBox(height: 10),
+                        
+                        // 🌟 追加：減っていくプログレスバー
+                        SizedBox(
+                          width: 200,
+                          child: LinearProgressIndicator(
+                            value: _remainingSeconds / 15, // 1.0 から 0.0 へ減る
+                            backgroundColor: Colors.white24,
+                            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                            minHeight: 8,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        
                         const SizedBox(height: 20),
                         ElevatedButton.icon(
                           onPressed: _stopAndUpload,
@@ -611,7 +691,6 @@ class _TimelinePageState extends State<TimelinePage> {
                 ),
               ),
             ),
-          // 🌟 ここにオーバーレイを追加だガオ！
           if (_isProcessing)
             RoarLoadingOverlay(
               message: "ライオン師匠が\nアドバイスをひねり出し中...",
