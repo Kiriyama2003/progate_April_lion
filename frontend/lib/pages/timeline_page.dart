@@ -34,10 +34,15 @@ class _TimelinePageState extends State<TimelinePage> {
   double _maxAmplitude = -100.0;
   Timer? _amplitudeTimer;
 
+  // 🌟 追加：15秒制限とカウントダウン用の変数
+  Timer? _maxRecordTimer;
+  Timer? _countdownTimer;
+  int _remainingSeconds = 15;
+
   bool _isProcessing = false;
   Timer? _timeoutTimer;
 
-  // 🌟 追加：現在の並び替えモード（初期値は「最新」）
+  // 現在の並び替えモード（初期値は「最新」）
   SortMode _currentSortMode = SortMode.latest;
 
   final Map<String, String> _avatarUrlCache = {};
@@ -94,17 +99,14 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  // 🌟 追加：リストを並び替える専用の関数
+  // リストを並び替える専用の関数
   void _applySorting() {
     setState(() {
       if (_currentSortMode == SortMode.latest) {
-        // 時間が新しい順
         _posts.sort((a, b) => (b['timestamp'] ?? "").compareTo(a['timestamp'] ?? ""));
       } else if (_currentSortMode == SortMode.popular) {
-        // バックエンドが計算してくれた totalReactions が大きい順
         _posts.sort((a, b) => (b['totalReactions'] as num? ?? 0).compareTo(a['totalReactions'] as num? ?? 0));
       } else if (_currentSortMode == SortMode.power) {
-        // roarPower が大きい順
         _posts.sort((a, b) => (b['roarPower'] as num? ?? -100).compareTo(a['roarPower'] as num? ?? -100));
       }
     });
@@ -116,7 +118,6 @@ class _TimelinePageState extends State<TimelinePage> {
       final List<dynamic> data = jsonDecode(res.decodeBody());
       
       if (mounted) {
-        // データをセットしてから並び替えを実行！
         setState(() => _posts = data);
         _applySorting(); 
       }
@@ -227,7 +228,6 @@ class _TimelinePageState extends State<TimelinePage> {
           }),
         ).response;
       }
-      // リアクションが変更されたらタイムライン全体の再取得をして、人気順を最新化する
       await _fetchTimeline();
     } catch (e) {
       print("リアクションエラー: $e");
@@ -242,21 +242,51 @@ class _TimelinePageState extends State<TimelinePage> {
         path = '${dir.path}/roar_temp.m4a';
       }
       _maxAmplitude = -100.0;
+      _remainingSeconds = 15; // 🌟 録音開始時に残り時間を15秒にリセット
+      
       await _recorder.start(const RecordConfig(), path: path);
+      
       _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (
         _,
       ) async {
         final amp = await _recorder.getAmplitude();
         if (amp.current > _maxAmplitude) _maxAmplitude = amp.current;
       });
+
+      // 🌟 1秒ごとにカウントダウンするタイマー
+      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted && _remainingSeconds > 0) {
+          setState(() => _remainingSeconds--);
+        }
+      });
+
       if (mounted) {
         setState(() => _isRecording = true);
       }
+
+      // 🌟 15秒経ったら自動でストップしてアップロードするタイマー
+      _maxRecordTimer = Timer(const Duration(seconds: 15), () {
+        if (_isRecording) {
+          _stopAndUpload();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('熱意は伝わったぜ！15秒で自動投稿したガオ！🔥'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      });
     }
   }
 
   Future<void> _stopAndUpload() async {
+    // 🌟 タイマーを全て解除してストップ
     _amplitudeTimer?.cancel();
+    _maxRecordTimer?.cancel();
+    _countdownTimer?.cancel();
+    
     final path = await _recorder.stop();
     if (mounted) {
       setState(() => _isRecording = false);
@@ -446,7 +476,6 @@ class _TimelinePageState extends State<TimelinePage> {
                   ],
                 ),
               ),
-              // 🌟 ここに並び替え用のタブを追加！
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 child: SegmentedButton<SortMode>(
@@ -460,9 +489,8 @@ class _TimelinePageState extends State<TimelinePage> {
                     setState(() {
                       _currentSortMode = newSelection.first;
                     });
-                    _applySorting(); // タブを変えた瞬間に並び替えを実行
+                    _applySorting(); 
                   },
-                  // 選ばれているボタンをオレンジ色にするオシャレ設定
                   style: ButtonStyle(
                     backgroundColor: WidgetStateProperty.resolveWith<Color>(
                       (Set<WidgetState> states) {
@@ -619,10 +647,30 @@ class _TimelinePageState extends State<TimelinePage> {
                           ),
                         ),
                         const SizedBox(height: 10),
-                        const Text(
-                          '録音中...',
-                          style: TextStyle(fontSize: 18, color: Colors.white70),
+                        
+                        // 🌟 追加：残り時間のカウントダウンテキスト
+                        Text(
+                          '残り $_remainingSeconds 秒',
+                          style: const TextStyle(
+                            fontSize: 24, 
+                            fontWeight: FontWeight.bold, 
+                            color: Colors.white
+                          ),
                         ),
+                        const SizedBox(height: 10),
+                        
+                        // 🌟 追加：減っていくプログレスバー
+                        SizedBox(
+                          width: 200,
+                          child: LinearProgressIndicator(
+                            value: _remainingSeconds / 15, // 1.0 から 0.0 へ減る
+                            backgroundColor: Colors.white24,
+                            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                            minHeight: 8,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        
                         const SizedBox(height: 20),
                         ElevatedButton.icon(
                           onPressed: _stopAndUpload,
