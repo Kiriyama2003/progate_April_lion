@@ -92,9 +92,9 @@ flutter build web
 
 
 ## 分担
-[Kiriyama2003](https://github.com/Kiriyama2003)
+-[Kiriyama2003](https://github.com/Kiriyama2003)
 バックエンド設計・実装、フロントとの統合
-[shuyaad](https://github.com/shuyaad)
+-[shuyaad](https://github.com/shuyaad)
 アイディア、フロントエンド（初期）
-[Yuji-ctrl](https://github.com/Yuji-ctrl)
+-[Yuji-ctrl](https://github.com/Yuji-ctrl)
 環境構築支援、アドバイス、agent_skillsの設定、段取り・マネジメント
