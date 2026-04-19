@@ -427,7 +427,7 @@ class _TimelinePageState extends State<TimelinePage> {
             children: [
               Container(
                 padding: const EdgeInsets.all(20),
-                color: Theme.of(context).colorScheme.surfaceVariant,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: Row(
                   children: [
                     const Expanded(child: Text("最新の声をチェックだガオ！")),
