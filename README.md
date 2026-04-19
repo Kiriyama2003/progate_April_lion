@@ -1,6 +1,7 @@
 # Gao Gao Savannah（ガオガオサバンナ）
 
-音声で「ガオ！」と吠えると、熱血ライオンが AI でアドバイスしてくれる Web アプリです。
+画面に向かって吠えると、熱血ライオンが AI でアドバイスしてくれる Web アプリです。
+ほかのライオンと交流することもでき、お互いにリアクションやコメントで励ましあうことができます。
 
 ## 特徴
 
@@ -87,3 +88,13 @@ flutter build web
 ### Amplify Hosting
 
 `amplify.yml` にて Flutter Web ビルドの設定がされており、Amplify Console に接続することで自動デプロイが可能です。build 成果物は `build/web` ディレクトリに出力されます。
+
+
+
+## 分担
+- [Kiriyama2003](https://github.com/Kiriyama2003)
+バックエンド設計・実装、フロントとの統合
+- [shuyaad](https://github.com/shuyaad)
+アイディア、フロントエンド（初期）
+- [Yuji-ctrl](https://github.com/Yuji-ctrl)
+環境構築支援、アドバイス、agent_skillsの設定、段取り・マネジメント
