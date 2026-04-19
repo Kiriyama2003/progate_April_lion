@@ -371,12 +371,15 @@ Future<void> _stopAndUpload() async {
             onPressed: () async {
               final user = await Amplify.Auth.getCurrentUser();
               if (!mounted) return;
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => UserProfilePage(userId: user.userId),
-                ),
+              await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => UserProfilePage(userId: user.userId),
+                  ),
               );
+              if (mounted) {
+                _fetchTimeline();
+              }
             },
           ),
           const SignOutButton(),
@@ -421,13 +424,18 @@ Future<void> _stopAndUpload() async {
                         ),
                         child: ListTile(
                           leading: InkWell(
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    UserProfilePage(userId: post['userId']),
-                              ),
-                            ),
+                            onTap: () async{
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      UserProfilePage(userId: post['userId']),
+                                ),
+                              );
+                              if (mounted) {
+                                _fetchTimeline();
+                              }
+                            },
                             child: CircleAvatar(
                               backgroundImage: avatarUrl != null
                                   ? NetworkImage(avatarUrl)
