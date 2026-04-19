@@ -2,7 +2,8 @@
 
 画面に向かって吠えると、熱血ライオンが AI でアドバイスしてくれる Web アプリです。
 ほかのライオンと交流することもでき、お互いにリアクションやコメントで励ましあうことができます。
-https://main.d2i6f8em3kuyef.amplifyapp.com/
+
+[2026年4月20日まで有効](https://main.d2i6f8em3kuyef.amplifyapp.com/)
 <img width="2160" height="1440" alt="GaoGaoSavannahScreen" src="https://github.com/user-attachments/assets/eb1a6589-b247-4ae0-b058-5edc0beb718d" />
 
 
