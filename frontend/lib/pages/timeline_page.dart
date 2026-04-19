@@ -11,6 +11,7 @@ import 'package:amplify_authenticator/amplify_authenticator.dart';
 
 import '../utils/format_utils.dart';
 import '../widgets/lion_painter.dart';
+import '../widgets/roar_loading_overlay.dart'; // 🌟 これを追加！
 import 'profile_page.dart';
 
 // ======================================================================
@@ -30,28 +31,33 @@ class _TimelinePageState extends State<TimelinePage> {
   double _maxAmplitude = -100.0;
   Timer? _amplitudeTimer;
 
+  // 🌟 追加：修行中（処理中）かどうかを判定するフラグと安全装置タイマー
+  bool _isProcessing = false;
+  Timer? _timeoutTimer;
+
   // アバターURLのキャッシュ
   final Map<String, String> _avatarUrlCache = {};
   
-  // 🌟 追加：リアクションのキャッシュと自分のユーザーID
+  // リアクションのキャッシュと自分のユーザーID
   final Map<String, Map<String, dynamic>> _reactionsCache = {};
-  // main.dart の _TimelinePageState クラス内
-  final Map<String, List<dynamic>> _commentsCache = {}; // 🌟 コメント保存用
-  final Map<String, TextEditingController> _commentControllers = {}; // 🌟 入力欄管理用
+  final Map<String, List<dynamic>> _commentsCache = {}; // コメント保存用
+  final Map<String, TextEditingController> _commentControllers = {}; // 入力欄管理用
   String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
-    _initUserId(); // 🌟 起動時に自分のIDを取得
+    _initUserId(); // 起動時に自分のIDを取得
     _fetchTimeline();
   }
 
-  // 🌟 追加：自分のユーザーIDを保持しておく関数
+  // 自分のユーザーIDを保持しておく関数
   Future<void> _initUserId() async {
     try {
       final user = await Amplify.Auth.getCurrentUser();
-      setState(() => _currentUserId = user.userId);
+      if (mounted) {
+        setState(() => _currentUserId = user.userId);
+      }
     } catch (e) {
       print("ユーザー情報取得エラー: $e");
     }
@@ -62,9 +68,11 @@ class _TimelinePageState extends State<TimelinePage> {
     if (s3Key.isEmpty || _avatarUrlCache.containsKey(s3Key)) return;
     try {
       final result = await Amplify.Storage.getUrl(key: s3Key).result;
-      setState(() {
-        _avatarUrlCache[s3Key] = result.url.toString();
-      });
+      if (mounted) {
+        setState(() {
+          _avatarUrlCache[s3Key] = result.url.toString();
+        });
+      }
     } catch (e) {
       print("アバター取得失敗: $e");
     }
@@ -94,17 +102,19 @@ class _TimelinePageState extends State<TimelinePage> {
       data.sort(
         (a, b) => (b['timestamp'] ?? "").compareTo(a['timestamp'] ?? ""),
       );
-      setState(() => _posts = data);
+      if (mounted) {
+        setState(() => _posts = data);
+      }
 
       for (var post in data) {
         if (post['avatarS3Key'] != null) {
           _loadAvatarUrl(post['avatarS3Key']);
         }
-        // 🌟 追加：各投稿のリアクション情報を取得する
+        // 各投稿のリアクション・コメント情報を取得する
         final postId = post['postId'] as String?;
         if (postId != null) {
           _loadReactions(postId);
-          _loadComments(postId); // 🌟 これを追加！
+          _loadComments(postId);
           _commentControllers.putIfAbsent(postId, () => TextEditingController());
         }
       }
@@ -113,7 +123,7 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  // 🌟 追加：リアクション取得処理 (API GET /reactions)
+  // リアクション取得処理 (API GET /reactions)
   Future<void> _loadReactions(String postId) async {
     if (postId.isEmpty) return;
     try {
@@ -122,30 +132,34 @@ class _TimelinePageState extends State<TimelinePage> {
         queryParameters: {'postId': postId},
       ).response;
       final data = jsonDecode(res.decodeBody()) as Map<String, dynamic>;
-      setState(() => _reactionsCache[postId] = data);
+      if (mounted) {
+        setState(() => _reactionsCache[postId] = data);
+      }
     } catch (e) {
       print("リアクション取得エラー: $e");
     }
   }
 
-  // 🌟 追加：コメントを取得する
+  // コメントを取得する
   Future<void> _loadComments(String postId) async {
     try {
       final res = await Amplify.API.get('comments', queryParameters: {'postId': postId}).response;
       final List<dynamic> data = jsonDecode(res.decodeBody());
-      setState(() => _commentsCache[postId] = data);
+      if (mounted) {
+        setState(() => _commentsCache[postId] = data);
+      }
     } catch (e) {
       print("コメント取得エラー: $e");
     }
   }
 
-  // 🌟 追加：コメントを投稿する
+  // コメントを投稿する
   Future<void> _postComment(String postId) async {
     final controller = _commentControllers[postId];
     if (controller == null || controller.text.isEmpty) return;
     
     final content = controller.text;
-    controller.clear(); // 🌟 送信ボタンを押したらすぐ消す！
+    controller.clear(); // 送信ボタンを押したらすぐ消す！
 
     try {
       final user = await Amplify.Auth.getCurrentUser();
@@ -156,13 +170,13 @@ class _TimelinePageState extends State<TimelinePage> {
         'content': content,
       })).response;
       
-      _loadComments(postId); // 🌟 投稿が終わったらリストを更新
+      _loadComments(postId); // 投稿が終わったらリストを更新
     } catch (e) {
       print("コメント投稿エラー: $e");
     }
   }
 
-  // 🌟 追加：リアクションの追加・削除処理（爆速UIバージョン！）
+  // リアクションの追加・削除処理
   Future<void> _toggleReaction(String postId, String reactionType) async {
     final userId = _currentUserId;
     if (userId == null) return;
@@ -170,29 +184,23 @@ class _TimelinePageState extends State<TimelinePage> {
     final reactions = _reactionsCache[postId] ?? {};
     final reactionData = reactions[reactionType] as Map<String, dynamic>?;
     
-    // 現在のリストとカウントをコピー
     final users = List<String>.from(reactionData?['users'] ?? []);
     var count = reactionData?['count'] as int? ?? 0;
     final hasReacted = users.contains(userId);
 
-    // ==========================================
-    // 🦁 1. 通信を待たずに、画面の見た目だけ「即座に」変える！
-    // ==========================================
-    setState(() {
-      if (hasReacted) {
-        users.remove(userId);
-        count--;
-      } else {
-        users.add(userId);
-        count++;
-      }
-      // キャッシュを上書きして画面を更新
-      _reactionsCache[postId]![reactionType] = {'count': count, 'users': users};
-    });
+    if (mounted) {
+      setState(() {
+        if (hasReacted) {
+          users.remove(userId);
+          count--;
+        } else {
+          users.add(userId);
+          count++;
+        }
+        _reactionsCache[postId]![reactionType] = {'count': count, 'users': users};
+      });
+    }
 
-    // ==========================================
-    // 🦁 2. その裏で、こっそりAWSにデータを送る
-    // ==========================================
     try {
       if (hasReacted) {
         await Amplify.API.delete(
@@ -209,11 +217,9 @@ class _TimelinePageState extends State<TimelinePage> {
           }),
         ).response;
       }
-      // 通信が成功したら、念のため最新データを取得し直す
       await _loadReactions(postId);
     } catch (e) {
       print("リアクションエラー: $e");
-      // もし通信エラーになったら、ここで元の色に戻す処理を書いたりします
     }
   }
 
@@ -232,54 +238,83 @@ class _TimelinePageState extends State<TimelinePage> {
         final amp = await _recorder.getAmplitude();
         if (amp.current > _maxAmplitude) _maxAmplitude = amp.current;
       });
-      setState(() => _isRecording = true);
+      if (mounted) {
+        setState(() => _isRecording = true);
+      }
     }
   }
 
-Future<void> _stopAndUpload() async {
+  // 🌟 録音停止・アップロード・AI処理を待つ
+  Future<void> _stopAndUpload() async {
     _amplitudeTimer?.cancel();
     final path = await _recorder.stop();
-    setState(() => _isRecording = false);
+    if (mounted) {
+      setState(() => _isRecording = false);
+    }
     if (path == null) return;
 
-    final fileName = 'roars/${DateTime.now().millisecondsSinceEpoch}.m4a';
-    
-    // アップロード
-    await Amplify.Storage.uploadFile(
-      localFile: AWSFile.fromPath(path),
-      key: fileName, 
-    ).result;
+    // 🌟 修行（通信）開始！くるくるを表示させる
+    if (mounted) {
+      setState(() => _isProcessing = true);
+    }
 
-    final user = await Amplify.Auth.getCurrentUser();
-    final profileRes = await Amplify.API
-        .get('profile', queryParameters: {'userId': user.userId})
-        .response;
-    final profile = jsonDecode(profileRes.decodeBody());
-    final currentName = profile['userName'] ?? user.username;
+    // 🌟 安全装置（タイマー）セット！1分後に強制終了
+    _timeoutTimer = Timer(const Duration(minutes: 1), () {
+      if (_isProcessing) {
+        if (mounted) {
+          setState(() => _isProcessing = false);
+        }
+        print("タイムアウトで修行中断だガオ！");
+      }
+    });
 
-    await Amplify.API
-        .post(
-          'roars',
-          body: HttpPayload.json({
-            "userId": user.userId,
-            "userName": currentName,
-            // 🌟 修正：'public/' を付けず、アップロードした時と同じ key を渡す！
-            "s3Key": fileName, 
-            "roarPower": _maxAmplitude,
-            "message": "サバンナに響け！",
-          }),
-        )
-        .response;
+    try {
+      final fileName = 'roars/${DateTime.now().millisecondsSinceEpoch}.m4a';
+      
+      // アップロード
+      await Amplify.Storage.uploadFile(
+        localFile: AWSFile.fromPath(path),
+        key: fileName, 
+      ).result;
 
-    _fetchTimeline();
-}
+      final user = await Amplify.Auth.getCurrentUser();
+      final profileRes = await Amplify.API
+          .get('profile', queryParameters: {'userId': user.userId})
+          .response;
+      final profile = jsonDecode(profileRes.decodeBody());
+      final currentName = profile['userName'] ?? user.username;
+
+      await Amplify.API
+          .post(
+            'roars',
+            body: HttpPayload.json({
+              "userId": user.userId,
+              "userName": currentName,
+              "s3Key": fileName, 
+              "roarPower": _maxAmplitude,
+              "message": "サバンナに響け！",
+            }),
+          )
+          .response;
+
+      await _fetchTimeline();
+    } catch (e) {
+      print("投稿エラー: $e");
+    } finally {
+      // 🌟 成功しても失敗しても、修行終了！くるくるを消す
+      _timeoutTimer?.cancel();
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
 
   Future<void> _playS3(String key) async {
     final result = await Amplify.Storage.getUrl(key: key).result;
     await _audioPlayer.play(UrlSource(result.url.toString()));
   }
 
-  // 🌟 追加：リアクションボタンのUI作成
+  // リアクションボタンのUI作成
   Widget _buildReactionButtons(String postId) {
     final reactions = _reactionsCache[postId] ?? {};
     
@@ -296,7 +331,8 @@ Future<void> _stopAndUpload() async {
       ),
     );
   }
-  // 🌟 追加：コメントエリアのUI
+
+  // コメントエリアのUI
   Widget _buildCommentSection(String postId) {
     final comments = _commentsCache[postId] ?? [];
     return Column(
@@ -335,7 +371,7 @@ Future<void> _stopAndUpload() async {
     );
   }
 
-  // 🌟 追加：各リアクションボタンのデザインと動作
+  // 各リアクションボタンのデザインと動作
   Widget _reactionChip(
     String postId,
     String type,
@@ -449,7 +485,6 @@ Future<void> _stopAndUpload() async {
                             post['userName'] ?? '名無し',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
-                          // main.dart の 290行目付近にある subtitle: Column(...) の中身
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -460,8 +495,6 @@ Future<void> _stopAndUpload() async {
                               Text(
                                 "Power: ${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB",
                               ),
-                              
-                              // 🌟 修正：文字起こしテキストを大きく・太字にする！
                               if (post['transcript'] != null && post['transcript'].isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.symmetric(vertical: 10.0),
@@ -469,12 +502,11 @@ Future<void> _stopAndUpload() async {
                                     "🗣️ 「${post['transcript']}」",
                                     style: const TextStyle(
                                       color: Colors.white,
-                                      fontSize: 22, // 👈 以前よりかなり大きくしました
-                                      fontWeight: FontWeight.bold, // 👈 太字で強調！
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),
-
                               if (post['aiAdvice'] != null && post['aiAdvice'].isNotEmpty)
                                 Container(
                                   margin: const EdgeInsets.only(top: 5),
@@ -489,12 +521,8 @@ Future<void> _stopAndUpload() async {
                                     style: const TextStyle(color: Colors.orangeAccent),
                                   ),
                                 ),
-                                
-                              // 🌟 既存のリアクションボタン
                               if (post['postId'] != null)
                                 _buildReactionButtons(post['postId']),
-                                
-                              // 🌟 追加：コメントセクションを表示する（ここが手順5のメイン！）
                               if (post['postId'] != null)
                                 _buildCommentSection(post['postId']),
                             ],
@@ -583,9 +611,17 @@ Future<void> _stopAndUpload() async {
                 ),
               ),
             ),
+          // 🌟 ここにオーバーレイを追加だガオ！
+          if (_isProcessing)
+            RoarLoadingOverlay(
+              message: "ライオン師匠が\nアドバイスをひねり出し中...",
+              onCancel: () {
+                _timeoutTimer?.cancel();
+                setState(() => _isProcessing = false);
+              },
+            ),
         ],
       ),
     );
   }
 }
-
