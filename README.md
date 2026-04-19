@@ -2,6 +2,9 @@
 
 画面に向かって吠えると、熱血ライオンが AI でアドバイスしてくれる Web アプリです。
 ほかのライオンと交流することもでき、お互いにリアクションやコメントで励ましあうことができます。
+<img width="2160" height="1440" alt="GaoGaoSavannahScreen" src="https://github.com/user-attachments/assets/eb1a6589-b247-4ae0-b058-5edc0beb718d" />
+
+
 
 ## 特徴
 
