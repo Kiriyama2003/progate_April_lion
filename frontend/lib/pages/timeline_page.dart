@@ -560,6 +560,7 @@ class _TimelinePageState extends State<TimelinePage> {
               );
               if (mounted) {
                 _fetchTimeline();
+                _checkCalibration();
               }
             },
           ),
@@ -625,88 +626,101 @@ class _TimelinePageState extends State<TimelinePage> {
                       final avatarS3Key = post['avatarS3Key'] as String?;
                       final avatarUrl = _avatarUrlCache[avatarS3Key];
 
+                      // 🌟 Cardの中身を ListTile から「Padding + Column」に変更するぜ！
                       return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        child: ListTile(
-                          leading: InkWell(
-                            onTap: () async{
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      UserProfilePage(userId: post['userId']),
-                                ),
-                              );
-                              if (mounted) {
-                                _fetchTimeline();
-                              }
-                            },
-                            child: CircleAvatar(
-                              backgroundImage: avatarUrl != null
-                                  ? NetworkImage(avatarUrl)
-                                  : null,
-                              child: avatarUrl == null
-                                  ? const Icon(Icons.pets)
-                                  : null,
-                            ),
-                          ),
-                          title: Text(
-                            post['userName'] ?? '名無し',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Column(
+                        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0), // カード内の余白を作る
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                _formatTimestamp(post['timestamp']),
-                                style: const TextStyle(fontSize: 12, color: Colors.grey),
-                              ),
-                              // 🌟 表示されるのは「真のパワー（伸び幅）」だ！数字がプラスになるぞ！
-                              Text(
-                                "Power: ${(post['roarPower'] as num? ?? 0) > 0 ? '+' : ''}${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB",
-                              ),
-                              if (post['transcript'] != null && post['transcript'].isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 10.0),
-                                  child: Text(
-                                    "🗣️ 「${post['transcript']}」",
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold,
+                              // 1. 【ここがポイント！】アバターと名前情報を横並びにする
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center, // 垂直方向の真ん中に揃える
+                                children: [
+                                  // 🌟 アバター
+                                  InkWell(
+                                    onTap: () async {
+                                      // 🌟 相手のユーザーIDを使ってプロフィール画面へジャンプ！
+                                      await Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => UserProfilePage(userId: post['userId']),
+                                        ),
+                                      );
+                                      // プロフィールから戻ってきたらタイムラインを更新する
+                                      if (mounted) {
+                                        _fetchTimeline();
+                                        _checkCalibration();
+                                      }
+                                    },
+                                    child: CircleAvatar(
+                                      radius: 20,
+                                      backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                                      child: avatarUrl == null ? const Icon(Icons.pets) : null,
                                     ),
                                   ),
+                                  const SizedBox(width: 12), // アバターと名前の間のスキマ
+                                  // 🌟 名前・時間・Power を縦に並べる
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          post['userName'] ?? '名無し',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                        ),
+                                        Text(
+                                          _formatTimestamp(post['timestamp']),
+                                          style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                        ),
+                                        Text(
+                                          "Power: ${(post['roarPower'] as num? ?? 0) > 0 ? '+' : ''}${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB",
+                                          style: const TextStyle(fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  // 🌟 再生ボタンを右端に配置
+                                  IconButton(
+                                    icon: const Icon(Icons.play_circle_fill, size: 36, color: Colors.orange),
+                                    onPressed: () => _playS3(post['s3Key']),
+                                  ),
+                                ],
+                              ),
+                              
+                              const SizedBox(height: 10), // ヘッダーと本文の間のスキマ
+
+                              // 2. 叫び声の内容（本文）
+                              if (post['transcript'] != null && post['transcript'].isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                  child: Text(
+                                    "🗣️ 「${post['transcript']}」",
+                                    style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                                  ),
                                 ),
+
+                              // 3. AI師匠のアドバイス
                               if (post['aiAdvice'] != null && post['aiAdvice'].isNotEmpty)
                                 Container(
-                                  margin: const EdgeInsets.only(top: 5),
-                                  padding: const EdgeInsets.all(8),
+                                  width: double.infinity, // 横幅いっぱい
+                                  padding: const EdgeInsets.all(10),
                                   decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(5),
-                                    border: Border.all(color: Colors.orange),
+                                    color: Colors.orange.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.orange.withOpacity(0.5)),
                                   ),
                                   child: Text(
                                     "🦁 AI師匠: ${post['aiAdvice']}",
-                                    style: const TextStyle(color: Colors.orangeAccent),
+                                    style: const TextStyle(color: Colors.orangeAccent, fontSize: 14),
                                   ),
                                 ),
-                              if (post['postId'] != null)
-                                _buildReactionButtons(post['postId']),
-                              if (post['postId'] != null)
-                                _buildCommentSection(post['postId']),
+                                
+                              // 4. リアクションとコメント（既存の関数を呼ぶ）
+                              if (post['postId'] != null) _buildReactionButtons(post['postId']),
+                              if (post['postId'] != null) _buildCommentSection(post['postId']),
                             ],
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(
-                              Icons.play_circle_fill,
-                              size: 40,
-                              color: Colors.orange,
-                            ),
-                            onPressed: () => _playS3(post['s3Key']),
                           ),
                         ),
                       );

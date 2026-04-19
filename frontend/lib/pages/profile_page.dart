@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:amplify_flutter/amplify_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/format_utils.dart'; // インポート
 
 // ======================================================================
@@ -155,6 +157,51 @@ class _UserProfilePageState extends State<UserProfilePage> {
     await _audioPlayer.play(UrlSource(result.url.toString()));
   }
 
+  // 🌟 キャリブレーション実行用の関数
+  Future<void> _redoCalibration() async {
+    final recorder = AudioRecorder(); // その場でレコーダー召喚！
+    
+    if (await recorder.hasPermission()) {
+      // 画面に「測定中...」と出すための簡易ダイアログ
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: Colors.orange),
+              SizedBox(height: 20),
+              Text("3秒間、普通の声を出してくれガオ！🦁"),
+            ],
+          ),
+        ),
+      );
+
+      double tempMax = -100.0;
+      await recorder.start(const RecordConfig(), path: ''); // Web/Mobile両対応
+
+      // 3秒間サンプリング
+      for (int i = 0; i < 30; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        final amp = await recorder.getAmplitude();
+        if (amp.current > tempMax) tempMax = amp.current;
+      }
+
+      await recorder.stop();
+      
+      // 記憶の上書き！
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble('basePower', tempMax);
+
+      if (mounted) {
+        Navigator.pop(context); // ダイアログを閉じる
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("基準パワーを ${tempMax.toStringAsFixed(1)} dB に更新したぜ！🔥")),
+        );
+      }
+    }
+  }
   @override
   Widget build(BuildContext context) {
     if (_isLoading)
@@ -180,19 +227,23 @@ class _UserProfilePageState extends State<UserProfilePage> {
                       : null,
                 ),
                 const SizedBox(height: 10),
-                Text(
-                  _profile['userName'] ?? '名無しライオン',
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
                 if (_isMe) ...[
-                  const SizedBox(height: 10),
+                  // 既存の編集ボタン
                   OutlinedButton.icon(
                     icon: const Icon(Icons.edit),
                     label: const Text('プロフィールを編集'),
                     onPressed: _editProfile,
+                  ),
+                  const SizedBox(height: 8), // 少しスキマを開ける
+                  // 🌟 追加：キャリブレーションやり直しボタン
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.settings_backup_restore),
+                    label: const Text('「最初の儀式」をやり直す'),
+                    onPressed: _redoCalibration, // さっき作った関数を呼ぶ！
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.orange,
+                      side: const BorderSide(color: Colors.orange),
+                    ),
                   ),
                 ],
               ],
