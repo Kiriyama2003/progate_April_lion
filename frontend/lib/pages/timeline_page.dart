@@ -425,6 +425,37 @@ class _TimelinePageState extends State<TimelinePage> {
     );
   }
 
+  double _getVolumeLevel(double roarPower) {
+    if (roarPower >= 0) return 1.0;
+    if (roarPower >= -10) return 0.8;
+    if (roarPower >= -20) return 0.6;
+    if (roarPower >= -30) return 0.4;
+    return 0.2;
+  }
+
+  double _getTextSize(double roarPower) {
+    final level = _getVolumeLevel(roarPower);
+    return 14 + (level * 10);
+  }
+
+  String _getVolumeIcon(double roarPower) {
+    if (roarPower >= -5) return '🦁💥';
+    if (roarPower >= -15) return '🔥';
+    if (roarPower >= -25) return '📢';
+    return '🎤';
+  }
+
+  String _getVolumeLabel(double roarPower) {
+    if (roarPower >= -5) return '爆音！';
+    if (roarPower >= -15) return '大音量！';
+    if (roarPower >= -25) return '普通';
+    return '小声';
+  }
+
+  double _getGlowIntensity(double roarPower) {
+    return _getVolumeLevel(roarPower) * 15;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -512,11 +543,37 @@ class _TimelinePageState extends State<TimelinePage> {
                       final post = _posts[index];
                       final avatarS3Key = post['avatarS3Key'] as String?;
                       final avatarUrl = _avatarUrlCache[avatarS3Key];
+                      final roarPower = (post['roarPower'] as num?)?.toDouble() ?? -50.0;
+                      final volumeLevel = _getVolumeLevel(roarPower);
+                      final textSize = _getTextSize(roarPower);
+                      final volumeIcon = _getVolumeIcon(roarPower);
+                      final volumeLabel = _getVolumeLabel(roarPower);
+                      final glowIntensity = _getGlowIntensity(roarPower);
 
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.orange.withOpacity(volumeLevel * 0.25),
+                              Colors.red.withOpacity(volumeLevel * 0.15),
+                              Colors.deepOrange.withOpacity(volumeLevel * 0.1),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          border: Border.all(
+                            color: Colors.orange.withOpacity(volumeLevel),
+                            width: 1 + volumeLevel * 3,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.orange.withOpacity(volumeLevel * 0.4),
+                              blurRadius: glowIntensity,
+                              spreadRadius: glowIntensity / 3,
+                            ),
+                          ],
                         ),
                         child: ListTile(
                           leading: InkWell(
@@ -541,9 +598,31 @@ class _TimelinePageState extends State<TimelinePage> {
                                   : null,
                             ),
                           ),
-                          title: Text(
-                            post['userName'] ?? '名無し',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          title: Row(
+                            children: [
+                              Text(
+                                post['userName'] ?? '名無し',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: textSize,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(volumeIcon, style: const TextStyle(fontSize: 16)),
+                              if (volumeLevel >= 0.6)
+                                Container(
+                                  margin: const EdgeInsets.only(left: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    volumeLabel,
+                                    style: const TextStyle(fontSize: 10, color: Colors.white),
+                                  ),
+                                ),
+                            ],
                           ),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -560,25 +639,28 @@ class _TimelinePageState extends State<TimelinePage> {
                                   padding: const EdgeInsets.symmetric(vertical: 10.0),
                                   child: Text(
                                     "🗣️ 「${post['transcript']}」",
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: Colors.white,
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold,
+                                      fontSize: textSize + 8,
+                                      fontWeight: volumeLevel > 0.6 ? FontWeight.bold : FontWeight.normal,
                                     ),
                                   ),
                                 ),
                               if (post['aiAdvice'] != null && post['aiAdvice'].isNotEmpty)
                                 Container(
                                   margin: const EdgeInsets.only(top: 5),
-                                  padding: const EdgeInsets.all(8),
+                                  padding: const EdgeInsets.all(10),
                                   decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(5),
-                                    border: Border.all(color: Colors.orange),
+                                    color: Colors.black.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.orange, width: 2),
                                   ),
                                   child: Text(
                                     "🦁 AI師匠: ${post['aiAdvice']}",
-                                    style: const TextStyle(color: Colors.orangeAccent),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ),
                               if (post['postId'] != null)
@@ -587,12 +669,8 @@ class _TimelinePageState extends State<TimelinePage> {
                                 _buildCommentSection(post['postId']),
                             ],
                           ),
-                          trailing: IconButton(
-                            icon: const Icon(
-                              Icons.play_circle_fill,
-                              size: 40,
-                              color: Colors.orange,
-                            ),
+                          trailing: _VolumePlayButton(
+                            volumeLevel: volumeLevel,
                             onPressed: () => _playS3(post['s3Key']),
                           ),
                         ),
@@ -701,6 +779,86 @@ class _TimelinePageState extends State<TimelinePage> {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _VolumePlayButton extends StatefulWidget {
+  final double volumeLevel;
+  final VoidCallback onPressed;
+  const _VolumePlayButton({required this.volumeLevel, required this.onPressed});
+
+  @override
+  State<_VolumePlayButton> createState() => _VolumePlayButtonState();
+}
+
+class _VolumePlayButtonState extends State<_VolumePlayButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: Duration(milliseconds: (1200 - widget.volumeLevel * 400).round()),
+      vsync: this,
+    );
+    if (widget.volumeLevel > 0.5) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _VolumePlayButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.volumeLevel != oldWidget.volumeLevel) {
+      _controller.duration = Duration(milliseconds: (1200 - widget.volumeLevel * 400).round());
+      if (widget.volumeLevel > 0.5 && !_controller.isAnimating) {
+        _controller.repeat(reverse: true);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.volumeLevel < 0.5) {
+      return IconButton(
+        icon: Icon(Icons.play_circle_fill, size: 40 + widget.volumeLevel * 10, color: Colors.orange),
+        onPressed: widget.onPressed,
+      );
+    }
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            return Container(
+              width: 45 + _controller.value * 15,
+              height: 45 + _controller.value * 15,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.orange.withOpacity((1 - _controller.value) * widget.volumeLevel * 0.25),
+              ),
+            );
+          },
+        ),
+        IconButton(
+          icon: Icon(
+            Icons.play_circle_fill,
+            size: 40 + widget.volumeLevel * 10,
+            color: Colors.orange,
+          ),
+          onPressed: widget.onPressed,
+        ),
+      ],
     );
   }
 }
