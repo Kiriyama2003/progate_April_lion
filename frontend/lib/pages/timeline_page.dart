@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:amplify_authenticator/amplify_authenticator.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // 🌟 追加：記憶用
 
 import '../utils/format_utils.dart';
 import '../widgets/lion_painter.dart';
@@ -34,7 +35,7 @@ class _TimelinePageState extends State<TimelinePage> {
   double _maxAmplitude = -100.0;
   Timer? _amplitudeTimer;
 
-  // 🌟 追加：15秒制限とカウントダウン用の変数
+  // 15秒制限とカウントダウン用の変数
   Timer? _maxRecordTimer;
   Timer? _countdownTimer;
   int _remainingSeconds = 15;
@@ -51,11 +52,122 @@ class _TimelinePageState extends State<TimelinePage> {
   final Map<String, TextEditingController> _commentControllers = {};
   String? _currentUserId;
 
+  // 🌟 追加：キャリブレーション（基準値）用の変数
+  double? _basePower;
+  bool _isCalibrating = false;
+
   @override
   void initState() {
     super.initState();
     _initUserId();
     _fetchTimeline();
+    _checkCalibration(); // 🌟 追加：起動時にキャリブレーションを確認
+  }
+
+  // 🌟 追加：初回起動かどうかのチェック
+  Future<void> _checkCalibration() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedBase = prefs.getDouble('basePower');
+    
+    if (savedBase == null) {
+      // 基準値がない（初回）場合は、画面が描画された直後にダイアログを出す
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showCalibrationDialog();
+      });
+    } else {
+      // すでに基準値があれば変数にセット
+      setState(() {
+        _basePower = savedBase;
+      });
+    }
+  }
+
+  // 🌟 追加：キャリブレーション用のダイアログ
+  Future<void> _showCalibrationDialog() async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false, // 測定が終わるまで閉じられないようにする
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('🦁 最初の儀式'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'マイク性能の差をなくし、公平なサバンナを作るぜ！\n\n'
+                    '「あー」と普段の会話くらいの声を出したまま、下のボタンを押してくれガオ！',
+                  ),
+                  const SizedBox(height: 20),
+                  if (_isCalibrating)
+                    const Column(
+                      children: [
+                        CircularProgressIndicator(color: Colors.orange),
+                        SizedBox(height: 10),
+                        Text('3秒間 測定中だガオ...'),
+                      ],
+                    )
+                  else
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        setStateDialog(() => _isCalibrating = true);
+                        await _runCalibration();
+                        if (context.mounted) {
+                          Navigator.of(context).pop(); // 測定が終わったら閉じる
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('測定完了！基準パワーは ${_basePower!.toStringAsFixed(1)} dB だぜ！'),
+                              backgroundColor: Colors.orange,
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.mic),
+                      label: const Text('測定開始 (3秒)'),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+                    ),
+                ],
+              ),
+            );
+          }
+        );
+      }
+    );
+  }
+
+  // 🌟 追加：3秒間だけ録音して基準値を保存する処理
+  Future<void> _runCalibration() async {
+    if (await _recorder.hasPermission()) {
+      String path = '';
+      if (!kIsWeb) {
+        final dir = await getTemporaryDirectory();
+        path = '${dir.path}/calib_temp.m4a';
+      }
+      double tempMax = -100.0;
+      await _recorder.start(const RecordConfig(), path: path);
+      
+      final timer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
+        final amp = await _recorder.getAmplitude();
+        if (amp.current > tempMax) tempMax = amp.current;
+      });
+
+      await Future.delayed(const Duration(seconds: 3)); // 3秒待つ
+      
+      timer.cancel();
+      await _recorder.stop();
+
+      // 測定した基準値をスマホに記憶させる
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble('basePower', tempMax);
+      
+      if (mounted) {
+        setState(() {
+          _basePower = tempMax;
+          _isCalibrating = false;
+        });
+      }
+    }
   }
 
   Future<void> _initUserId() async {
@@ -242,7 +354,7 @@ class _TimelinePageState extends State<TimelinePage> {
         path = '${dir.path}/roar_temp.m4a';
       }
       _maxAmplitude = -100.0;
-      _remainingSeconds = 15; // 🌟 録音開始時に残り時間を15秒にリセット
+      _remainingSeconds = 15; 
       
       await _recorder.start(const RecordConfig(), path: path);
       
@@ -253,7 +365,6 @@ class _TimelinePageState extends State<TimelinePage> {
         if (amp.current > _maxAmplitude) _maxAmplitude = amp.current;
       });
 
-      // 🌟 1秒ごとにカウントダウンするタイマー
       _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted && _remainingSeconds > 0) {
           setState(() => _remainingSeconds--);
@@ -264,7 +375,6 @@ class _TimelinePageState extends State<TimelinePage> {
         setState(() => _isRecording = true);
       }
 
-      // 🌟 15秒経ったら自動でストップしてアップロードするタイマー
       _maxRecordTimer = Timer(const Duration(seconds: 15), () {
         if (_isRecording) {
           _stopAndUpload();
@@ -282,7 +392,6 @@ class _TimelinePageState extends State<TimelinePage> {
   }
 
   Future<void> _stopAndUpload() async {
-    // 🌟 タイマーを全て解除してストップ
     _amplitudeTimer?.cancel();
     _maxRecordTimer?.cancel();
     _countdownTimer?.cancel();
@@ -321,6 +430,9 @@ class _TimelinePageState extends State<TimelinePage> {
       final profile = jsonDecode(profileRes.decodeBody());
       final currentName = profile['userName'] ?? user.username;
 
+      // 🌟 ここが最大の魔法！「真のパワー（伸び幅）」を計算する
+      double finalPower = _maxAmplitude - (_basePower ?? -50.0);
+
       await Amplify.API
           .post(
             'roars',
@@ -328,7 +440,7 @@ class _TimelinePageState extends State<TimelinePage> {
               "userId": user.userId,
               "userName": currentName,
               "s3Key": fileName, 
-              "roarPower": _maxAmplitude,
+              "roarPower": finalPower, // 🌟 真のパワーをAWSに送る！
               "message": "サバンナに響け！",
             }),
           )
@@ -460,7 +572,7 @@ class _TimelinePageState extends State<TimelinePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🦁 タイムライン'),
+        title: const Text('🦁 ガオガオ サバンナ'),
         actions: [
           IconButton(
             onPressed: _fetchTimeline,
@@ -631,8 +743,9 @@ class _TimelinePageState extends State<TimelinePage> {
                                 _formatTimestamp(post['timestamp']),
                                 style: const TextStyle(fontSize: 12, color: Colors.grey),
                               ),
+                              // 🌟 表示されるのは「真のパワー（伸び幅）」だ！数字がプラスになるぞ！
                               Text(
-                                "Power: ${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB",
+                                "Power: ${(post['roarPower'] as num? ?? 0) > 0 ? '+' : ''}${(post['roarPower'] as num? ?? 0).toStringAsFixed(1)} dB",
                               ),
                               if (post['transcript'] != null && post['transcript'].isNotEmpty)
                                 Padding(
@@ -726,7 +839,6 @@ class _TimelinePageState extends State<TimelinePage> {
                         ),
                         const SizedBox(height: 10),
                         
-                        // 🌟 追加：残り時間のカウントダウンテキスト
                         Text(
                           '残り $_remainingSeconds 秒',
                           style: const TextStyle(
@@ -737,11 +849,10 @@ class _TimelinePageState extends State<TimelinePage> {
                         ),
                         const SizedBox(height: 10),
                         
-                        // 🌟 追加：減っていくプログレスバー
                         SizedBox(
                           width: 200,
                           child: LinearProgressIndicator(
-                            value: _remainingSeconds / 15, // 1.0 から 0.0 へ減る
+                            value: _remainingSeconds / 15,
                             backgroundColor: Colors.white24,
                             valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
                             minHeight: 8,
